@@ -378,6 +378,37 @@ function closeProductModal() {
 }
 window.closeProductModal = closeProductModal;
 
+// Opens image searches (Google Images / PartSouq) as a small window
+// docked to the right half of the screen, instead of a full new tab,
+// so the Admin page stays visible on the left. That way you can drag
+// an image straight out of the search window onto a drop zone here
+// without downloading it first.
+function openSideSearchWindow(url) {
+  const screenW = window.screen.availWidth || 1280;
+  const screenH = window.screen.availHeight || 800;
+  const winW = Math.round(screenW / 2);
+  const winH = screenH;
+  const left = screenW - winW; // dock to the right edge
+  const top = 0;
+  const features = `width=${winW},height=${winH},left=${left},top=${top},noopener`;
+  const win = window.open(url, 'kiloImageSearch', features);
+  if (win) {
+    win.focus();
+    // Try to slide/shrink the Admin window itself to the left half too,
+    // so both are visible side by side (not all browsers allow this on
+    // an existing window, but it's harmless where it's blocked).
+    try {
+      window.resizeTo(left, screenH);
+      window.moveTo(0, 0);
+    } catch (e) { /* ignore if browser blocks resizing the main window */ }
+  } else {
+    // Popup blocked — fall back to a normal tab so the search still works.
+    window.open(url, '_blank', 'noopener');
+  }
+  return false; // prevent the default full-tab navigation
+}
+window.openSideSearchWindow = openSideSearchWindow;
+
 function setupDropZone(el, onFiles) {
   if (!el) return;
   ['dragenter', 'dragover'].forEach(evt => el.addEventListener(evt, e => {
@@ -583,8 +614,8 @@ function renderMissingImagesList() {
           <p class="text-sm text-white font-medium truncate">${p.name}</p>
           <p class="text-xs text-slate-500 truncate">${p.partNumber ? 'Part# ' + p.partNumber + ' &middot; ' : ''}${p.brand ? p.brand + ' &middot; ' : ''}${p.category}</p>
           <div class="flex gap-3 mt-1">
-            <a href="${googleImagesUrl}" target="_blank" rel="noopener" class="text-[11px] text-blue-400 hover:text-blue-300 font-semibold"><i class="fa-brands fa-google mr-1"></i>Search Google Images</a>
-            <a href="${partSouqUrl}" target="_blank" rel="noopener" class="text-[11px] text-amber-400 hover:text-amber-300 font-semibold"><i class="fa-solid fa-magnifying-glass mr-1"></i>Search PartSouq</a>
+            <a href="${googleImagesUrl}" onclick="return openSideSearchWindow(this.href);" class="text-[11px] text-blue-400 hover:text-blue-300 font-semibold"><i class="fa-brands fa-google mr-1"></i>Search Google Images</a>
+            <a href="${partSouqUrl}" onclick="return openSideSearchWindow(this.href);" class="text-[11px] text-amber-400 hover:text-amber-300 font-semibold"><i class="fa-solid fa-magnifying-glass mr-1"></i>Search PartSouq</a>
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
