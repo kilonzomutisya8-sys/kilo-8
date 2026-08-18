@@ -20,6 +20,7 @@ const SUPABASE_KEY = 'sb_publishable_JlwCsJ-u6Ge47XRQEfhB4A_Sddc_Tb6';
 
 const SUPABASE_REST = `${SUPABASE_URL}/rest/v1`;
 const SUPABASE_STORAGE = `${SUPABASE_URL}/storage/v1`;
+const SUPABASE_FUNCTIONS = `${SUPABASE_URL}/functions/v1`;
 const PRODUCT_IMAGE_BUCKET = 'product-images';
 
 function sbHeaders(extra) {
@@ -238,6 +239,26 @@ async function sbUploadImage(file) {
     throw new Error(`Image upload failed (${res.status}) ${detail}`);
   }
   return `${SUPABASE_STORAGE}/object/public/${PRODUCT_IMAGE_BUCKET}/${path}`;
+}
+
+// Downloads an external image URL (e.g. something found via a Google
+// Images or PartSouq search) into YOUR product-images storage bucket,
+// via the "fetch-external-image" Supabase Edge Function — see
+// SUPABASE_SETUP.md for the one-time deploy step. Returns the new,
+// permanent Supabase-hosted URL. Throws with a friendly message if
+// the source blocks automated downloads, isn't an image, etc.
+async function sbFetchExternalImage(sourceUrl) {
+  const res = await fetch(`${SUPABASE_FUNCTIONS}/fetch-external-image`, {
+    method: 'POST',
+    headers: sbHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ url: sourceUrl })
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) { /* ignore */ }
+  if (!res.ok) {
+    throw new Error((data && data.error) || `Could not download that image (${res.status}).`);
+  }
+  return data.url;
 }
 
 // Lists every file currently sitting in the product-images storage

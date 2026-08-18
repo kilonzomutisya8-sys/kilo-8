@@ -257,6 +257,33 @@ photo. Existing products will simply have a blank part number until
 you fill it in (via Edit Product, or a re-upload with a "Part Number"
 column in your XLSX/CSV — see the Bulk Upload help text in Admin).
 
+## Deploying the "download image into Supabase" function
+
+The **Find Missing Images** screen in Admin lets you paste or drag in
+an image link (e.g. from a Google Images or PartSouq search) instead
+of a file from your computer. To make that link actually display
+reliably — many sites block other websites from showing their images
+directly ("hotlink protection") — a small function on your Supabase
+project downloads the image server-side and saves it into your own
+`product-images` storage bucket, so from then on it's served from
+your own site, not the original one.
+
+**One-time setup:**
+
+1. In your Supabase project, go to **Edge Functions** in the sidebar.
+2. Click **Deploy a new function**.
+3. Name it exactly `fetch-external-image`.
+4. Open `supabase/functions/fetch-external-image/index.ts` from this
+   folder, copy its contents, and paste them into the function editor.
+5. Click **Deploy**.
+
+No extra secrets or configuration needed — Supabase automatically
+gives the function access to your project's URL and key. If this
+function isn't deployed yet, pasting/dragging an image *link* into
+Find Missing Images will show an error; uploading a file from your
+computer with the **Upload** button always works regardless, since
+that never needs this function.
+
 ## A note on security
 
 The key in `supabase.js` is a "publishable" key — safe to ship in

@@ -647,10 +647,17 @@ function renderMissingImagesList() {
 
       saveBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
         try {
-          let imageUrl = urlInput.value.trim();
-          if (pickedFile) imageUrl = await sbUploadImage(pickedFile);
+          let imageUrl;
+          if (pickedFile) {
+            saveBtn.textContent = 'Uploading...';
+            imageUrl = await sbUploadImage(pickedFile);
+          } else {
+            const pastedUrl = urlInput.value.trim();
+            if (!pastedUrl) { saveBtn.disabled = false; return; }
+            saveBtn.textContent = 'Downloading...';
+            imageUrl = await sbFetchExternalImage(pastedUrl);
+          }
           await sbUpdateProduct(p.id, { ...p, image: imageUrl });
           const local = allProducts.find(x => x.id === p.id);
           if (local) local.image = imageUrl;
