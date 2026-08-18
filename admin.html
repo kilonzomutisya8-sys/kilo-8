@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — Kilo Auto Spares Ltd</title>
+    <meta name="robots" content="noindex, nofollow">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen">
+
+    <!-- Simple header (not the public nav — admin is a back-office tool) -->
+    <header class="bg-slate-950 border-b border-slate-800 py-4 px-4 sm:px-8 flex items-center justify-between">
+        <a href="index.html" class="flex items-center space-x-3">
+            <div class="bg-red-600 text-white p-2 rounded-lg font-black text-xl tracking-wider">
+                <i class="fa-solid fa-car-wrench"></i>
+            </div>
+            <div>
+                <span class="text-lg font-bold tracking-tight text-white block leading-tight">KILO AUTO SPARES LTD</span>
+                <span class="text-xs text-red-500 font-semibold tracking-widest uppercase">Admin Panel</span>
+            </div>
+        </a>
+        <div class="flex items-center gap-3">
+            <a href="index.html" class="text-sm text-slate-400 hover:text-white transition"><i class="fa-solid fa-arrow-left mr-1"></i> Back to Site</a>
+            <button id="logoutBtn" class="hidden text-sm bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-lg transition">
+                <i class="fa-solid fa-right-from-bracket mr-1"></i> Log Out
+            </button>
+        </div>
+    </header>
+
+    <!-- Login gate -->
+    <div id="loginScreen" class="max-w-sm mx-auto mt-24 px-4">
+        <div class="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center">
+            <div class="w-14 h-14 rounded-lg bg-red-600/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+                <i class="fa-solid fa-lock text-red-500 text-xl"></i>
+            </div>
+            <h1 class="text-xl font-bold text-white mb-1">Admin Login</h1>
+            <p class="text-xs text-slate-500 mb-6">Staff access only.</p>
+            <input type="password" id="adminPassword" placeholder="Enter password" class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition mb-3" onkeydown="if(event.key==='Enter') attemptLogin()">
+            <button onclick="attemptLogin()" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition">Log In</button>
+            <p id="loginError" class="text-xs text-red-400 mt-3 hidden">Incorrect password. Try again.</p>
+        </div>
+        <p class="text-xs text-slate-600 text-center mt-4 max-w-xs mx-auto">Note: this is a basic password screen suited to a small static site. It is not bank-grade security — see the notice below once logged in.</p>
+    </div>
+
+    <!-- Admin dashboard (shown after login) -->
+    <div id="adminDashboard" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+
+        <!-- Important workflow notice -->
+        <div class="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm rounded-xl p-4 mb-8 flex items-start gap-3">
+            <i class="fa-solid fa-bolt mt-0.5"></i>
+            <div>
+                <p class="font-semibold mb-1">Changes here go live instantly</p>
+                <p class="text-emerald-300/80">Every add, edit, delete, and bulk upload below writes straight to your Supabase database — the same database Home, Shop, About and Contact all read from. There's no export/upload step anymore: as soon as you save a product, it's live for every visitor. Use <strong>Export Backup (JSON)</strong> any time you want a local copy of your catalogue.</p>
+            </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+            <div>
+                <h1 class="text-2xl font-bold text-white">Manage Products</h1>
+                <p class="text-sm text-slate-400">Add, edit, or remove parts, upload photos, and update pricing.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <button id="pricesToggleBtn" onclick="togglePricesVisibility()" disabled class="bg-slate-800 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2 border border-slate-700 disabled:opacity-50" title="Controls whether prices show to visitors on the live site">
+                    <i id="pricesToggleIcon" class="fa-solid fa-eye"></i>
+                    <span id="pricesToggleLabel">Prices: Loading…</span>
+                </button>
+                <button onclick="openProductModal()" class="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2">
+                    <i class="fa-solid fa-plus"></i> Add Product
+                </button>
+                <button onclick="openBulkPhotoModal()" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2">
+                    <i class="fa-solid fa-images"></i> Bulk Photo to Selected Products
+                </button>
+                <button onclick="openMissingImagesModal()" class="bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Shows every product with no photo yet, with its Part Number/Brand/Name, so you can upload photos quickly one by one">
+                    <i class="fa-solid fa-magnifying-glass"></i> Find Missing Images
+                </button>
+                <button onclick="openBulkDeleteModal()" class="bg-rose-900 hover:bg-rose-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Search/filter products, tick as many as you like, and permanently delete them all at once">
+                    <i class="fa-solid fa-trash-can"></i> Bulk Delete Products
+                </button>
+                <button id="autoFixCatBtn" onclick="autoFixCategories(this)" class="bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Scans every product and fixes any that ended up filed under the wrong category">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Fix Categories
+                </button>
+                <button onclick="exportProducts()" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2">
+                    <i class="fa-solid fa-file-export"></i> Export Backup (JSON)
+                </button>
+                <button id="deleteAllImagesBtn" onclick="deleteAllImages(this)" class="bg-rose-950 hover:bg-rose-800 text-rose-300 hover:text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2 border border-rose-800" title="Deletes every uploaded photo and clears every product's photo field. Products themselves are kept.">
+                    <i class="fa-solid fa-trash"></i> Delete All Images
+                </button>
+                <button onclick="refreshProducts()" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Reload the product list from Supabase">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+            </div>
+        </div>
+
+        <p class="text-xs text-slate-500 -mt-4 mb-6">The <strong>Prices</strong> toggle above controls whether prices are visible to visitors on the live site. This table always shows real prices to you here regardless of that setting.</p>
+
+        <!-- Search / filter -->
+        <div class="flex flex-col sm:flex-row gap-3 mb-6">
+            <input type="text" id="adminSearch" placeholder="Search products by name or brand..." class="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+            <select id="adminCategoryFilter" class="px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 outline-none transition">
+                <option value="all">All Categories</option>
+            </select>
+        </div>
+
+        <!-- Product table -->
+        <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-slate-900 text-slate-400 text-xs uppercase tracking-wide">
+                            <th class="text-left px-4 py-3">Photo</th>
+                            <th class="text-left px-4 py-3">Name</th>
+                            <th class="text-left px-4 py-3">Brand</th>
+                            <th class="text-left px-4 py-3">Category</th>
+                            <th class="text-left px-4 py-3">Price (KES)</th>
+                            <th class="text-left px-4 py-3">Status</th>
+                            <th class="text-right px-4 py-3">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminProductTable" class="divide-y divide-slate-800"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Product Modal -->
+    <div id="productModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeProductModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 overflow-y-auto">
+            <div class="bg-slate-950 border border-slate-800 rounded-xl w-full max-w-lg my-8">
+                <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+                    <h2 id="modalTitle" class="text-lg font-bold text-white">Add Product</h2>
+                    <button onclick="closeProductModal()" class="text-slate-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <form id="productForm" class="p-6 space-y-4">
+                    <input type="hidden" id="pId">
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Product Name *</label>
+                        <input type="text" id="pName" required class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                    </div>
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Part Number</label>
+                        <input type="text" id="pPartNumber" placeholder="e.g. MR552951 (optional, but helps you find the right photo later)" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Price (KES) *</label>
+                            <input type="number" id="pPrice" required min="0" step="1" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Original Price (KES)</label>
+                            <input type="number" id="pOriginalPrice" min="0" step="1" placeholder="Leave blank = no discount" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                            <p class="text-[11px] text-slate-500 mt-1">Only fill this in if the part is on sale — it's what turns on the "-X%" badge and strikethrough price. Leave empty for normal pricing.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Brand</label>
+                            <input type="text" id="pBrand" placeholder="e.g. Bosch (optional)" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Category *</label>
+                            <select id="pCategory" required class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 outline-none transition"></select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-4">
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Subcategory</label>
+                            <input type="text" id="pSubcategory" list="pSubcategoryOptions" placeholder="e.g. Brake Pads" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                            <datalist id="pSubcategoryOptions"></datalist>
+                            <p class="text-[11px] text-slate-500 mt-1">Suggestions update based on the Category selected above. Leave blank for categories with no subcategories (e.g. German Parts, Car Batteries, Tyres).</p>
+                        </div>
+                    </div>
+
+                    <div id="pBulkDropZone" class="bg-slate-900/60 border-2 border-dashed border-emerald-600/40 rounded-lg p-4 transition">
+                        <p class="text-xs text-slate-300 mb-1"><i class="fa-solid fa-file-excel text-emerald-500 mr-1"></i> <strong>Or add many parts at once</strong> — drag an Excel/CSV file in, or click to browse.</p>
+                        <p class="text-[11px] text-slate-500 mb-3">Columns needed: <code class="text-emerald-400">Name</code>, <code class="text-emerald-400">Price</code>. Optional: <code class="text-emerald-400">Part Number</code> (e.g. "MR552951" — shown in the Find Missing Images tool to help you locate the right photo), <code class="text-emerald-400">Category</code>, <code class="text-emerald-400">Subcategory</code>, <code class="text-emerald-400">Brand</code>, <code class="text-emerald-400">OriginalPrice</code>, <code class="text-emerald-400">Description</code>, <code class="text-emerald-400">Image</code> (a photo URL). If a row has its own Category/Subcategory, that's used — otherwise it falls back to the Category/Subcategory picked above. Category names must match one of your existing categories exactly (e.g. "Suspension Parts"); unmatched rows are skipped and listed after upload so nothing goes in silently wrong.</p>
+                        <label id="pBulkDropLabel" class="inline-flex items-center gap-2 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-4 py-2.5 rounded-lg transition cursor-pointer">
+                            <i class="fa-solid fa-upload"></i> Drag file here or click to browse
+                            <input type="file" accept=".xlsx,.xls,.csv" id="pBulkExcelInput" class="hidden">
+                        </label>
+                    </div>
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Description</label>
+                        <textarea id="pDescription" rows="2" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition"></textarea>
+                    </div>
+
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Product Photo</label>
+                        <div id="pImageDropZone" class="mt-1 flex items-center gap-4 border-2 border-dashed border-slate-700 rounded-lg p-3 transition">
+                            <img id="pImagePreview" src="" class="w-20 h-20 rounded-lg object-cover bg-slate-900 border border-slate-700 hidden">
+                            <div class="flex-1 space-y-2">
+                                <label class="w-full text-xs text-slate-400 flex flex-col gap-1 cursor-pointer">
+                                    <span class="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition w-fit">
+                                        <i class="fa-solid fa-upload"></i> Drag a photo here, click to browse, or paste (Ctrl+V)
+                                    </span>
+                                    <input type="file" id="pImageFile" accept="image/*" class="hidden">
+                                </label>
+                                <p class="text-xs text-slate-600">or paste an image URL below</p>
+                                <input type="text" id="pImageUrl" placeholder="https://..." class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-red-500 outline-none transition">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3 pt-2">
+                        <button type="button" onclick="closeProductModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 rounded-lg transition">Cancel</button>
+                        <button type="submit" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition">Save Product</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Apply Photo to Selected Products Modal -->
+    <div id="bulkPhotoModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeBulkPhotoModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 overflow-y-auto">
+            <div class="bg-slate-950 border border-slate-800 rounded-xl w-full max-w-lg my-8">
+                <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+                    <h2 class="text-lg font-bold text-white">Bulk Apply Photo to Selected Products</h2>
+                    <button onclick="closeBulkPhotoModal()" class="text-slate-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <p class="text-xs text-slate-500">Upload one photo, then tick exactly which products should get it — pick 5, 10, 20, or any number you like. This means products in the same subcategory can still each have their own photo; use the filters below just to narrow the list down, then check the ones you want.</p>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Filter: Category</label>
+                            <select id="bpCategory" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 outline-none transition">
+                                <option value="all">All Categories</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Filter: Subcategory</label>
+                            <select id="bpSubcategory" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 outline-none transition">
+                                <option value="all">All Subcategories</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Filter: Search</label>
+                        <input type="text" id="bpSearch" placeholder="Narrow the list by name or brand..." class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                    </div>
+
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Pick Products *</label>
+                            <div class="flex gap-2">
+                                <button type="button" onclick="bulkPhotoSelectAllVisible()" class="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300">Select all shown</button>
+                                <span class="text-slate-700">|</span>
+                                <button type="button" onclick="bulkPhotoClearSelection()" class="text-[11px] font-semibold text-slate-400 hover:text-white">Clear selection</button>
+                            </div>
+                        </div>
+                        <div id="bpProductList" class="max-h-56 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg divide-y divide-slate-800"></div>
+                        <p id="bpMatchCount" class="text-xs text-slate-500 min-h-[1rem] mt-2"></p>
+                    </div>
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Photo to Apply</label>
+                        <div id="bpImageDropZone" class="mt-1 flex items-center gap-4 border-2 border-dashed border-slate-700 rounded-lg p-3 transition">
+                            <img id="bpImagePreview" src="" class="w-20 h-20 rounded-lg object-cover bg-slate-900 border border-slate-700 hidden">
+                            <div class="flex-1 space-y-2">
+                                <label class="w-full text-xs text-slate-400 flex flex-col gap-1 cursor-pointer">
+                                    <span class="inline-flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition w-fit">
+                                        <i class="fa-solid fa-upload"></i> Drag a photo here, click to browse, or paste (Ctrl+V)
+                                    </span>
+                                    <input type="file" id="bpImageFile" accept="image/*" class="hidden">
+                                </label>
+                                <p class="text-xs text-slate-600">or paste an image URL below</p>
+                                <input type="text" id="bpImageUrl" placeholder="https://..." class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-red-500 outline-none transition">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3 pt-2">
+                        <button type="button" onclick="closeBulkPhotoModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 rounded-lg transition">Cancel</button>
+                        <button type="button" id="bpApplyBtn" onclick="applyBulkPhoto()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition">Apply Photo</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Find Missing Images Modal -->
+    <div id="missingImagesModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeMissingImagesModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 overflow-y-auto">
+            <div class="bg-slate-950 border border-slate-800 rounded-xl w-full max-w-3xl my-8">
+                <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-lg font-bold text-white"><i class="fa-solid fa-magnifying-glass text-amber-500 mr-1"></i> Find Missing Images</h2>
+                        <p id="miProgressLabel" class="text-xs text-slate-500 mt-1">Loading…</p>
+                    </div>
+                    <button onclick="closeMissingImagesModal()" class="text-slate-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <p class="text-xs text-slate-500">Every product below has no photo yet. Search by part number, brand, or name to jump to a specific one, then upload a file or paste an image URL right in its row — it saves immediately and drops off this list.</p>
+
+                    <input type="text" id="miSearch" placeholder="Search by part number, brand, or name..." class="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+
+                    <div id="miList" class="divide-y divide-slate-800 border border-slate-800 rounded-lg overflow-hidden"></div>
+
+                    <div class="flex items-center justify-between pt-1">
+                        <button type="button" onclick="miPrevPage()" class="text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed" id="miPrevBtn"><i class="fa-solid fa-chevron-left mr-1"></i> Previous 50</button>
+                        <span id="miPageLabel" class="text-xs text-slate-500"></span>
+                        <button type="button" onclick="miNextPage()" class="text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed" id="miNextBtn">Next 50 <i class="fa-solid fa-chevron-right ml-1"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Delete Products Modal -->
+    <div id="bulkDeleteModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeBulkDeleteModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 overflow-y-auto">
+            <div class="bg-slate-950 border border-rose-900 rounded-xl w-full max-w-lg my-8">
+                <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+                    <h2 class="text-lg font-bold text-white"><i class="fa-solid fa-trash-can text-rose-500 mr-1"></i> Bulk Delete Products</h2>
+                    <button onclick="closeBulkDeleteModal()" class="text-slate-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <p class="text-xs text-rose-300/80 bg-rose-500/10 border border-rose-500/30 rounded-lg p-3"><i class="fa-solid fa-triangle-exclamation mr-1"></i> This permanently deletes every product you tick below from the live site. It can't be undone. Use the filters just to narrow the list, then tick exactly which ones should go.</p>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Filter: Category</label>
+                            <select id="bdCategory" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 outline-none transition">
+                                <option value="all">All Categories</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Filter: Subcategory</label>
+                            <select id="bdSubcategory" class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 outline-none transition">
+                                <option value="all">All Subcategories</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Filter: Search</label>
+                        <input type="text" id="bdSearch" placeholder="Type a name or brand — e.g. 'Volkswagen' matches anything starting with those letters..." class="mt-1 w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                    </div>
+
+                    <div>
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Select Products to Delete</label>
+                            <div class="flex gap-2">
+                                <button type="button" onclick="bulkDeleteSelectAllVisible()" class="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300">Select all shown</button>
+                                <span class="text-slate-700">|</span>
+                                <button type="button" onclick="bulkDeleteClearSelection()" class="text-[11px] font-semibold text-slate-400 hover:text-white">Clear selection</button>
+                            </div>
+                        </div>
+                        <div id="bdProductList" class="max-h-56 overflow-y-auto bg-slate-900 border border-slate-700 rounded-lg divide-y divide-slate-800"></div>
+                        <p id="bdMatchCount" class="text-xs text-slate-500 min-h-[1rem] mt-2"></p>
+                    </div>
+
+                    <div class="flex gap-3 pt-2">
+                        <button type="button" onclick="closeBulkDeleteModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-semibold py-3 rounded-lg transition">Cancel</button>
+                        <button type="button" id="bdDeleteBtn" onclick="applyBulkDelete()" class="flex-1 bg-rose-700 hover:bg-rose-600 text-white font-bold py-3 rounded-lg transition">Delete Selected</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="supabase.js"></script>
+    <script src="products.js"></script>
+    <script src="admin.js"></script>
+</body>
+</html>

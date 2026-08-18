@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kilo Auto Spares — Product Cleanup Tool</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans">
+<div class="max-w-5xl mx-auto p-6">
+
+  <h1 class="text-2xl font-bold mb-1">Product Cleanup Tool</h1>
+  <p class="text-slate-600 mb-4">
+    Finds products in your live Supabase catalogue that match the rules below, then either
+    <strong>hides</strong> them from the site (keeps the data, reversible) or <strong>permanently deletes</strong> them.
+    Nothing happens until you review the list and confirm.
+  </p>
+
+  <div class="bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-4 mb-6 text-sm">
+    <strong>Logic:</strong> products with <strong>no brand set stay untouched</strong>, no matter what category
+    they're in. Brand matching is <em>fuzzy</em> — it compares letters only (ignoring spaces, punctuation, and case)
+    and counts it as a match at <strong>70% similarity or higher</strong>, so "Liqui Moly" will also catch things
+    like "Liqu Moly", "LiquiMolly", or "Liqui-Moly Oils" without needing an exact spelling match.
+  </div>
+
+  <div class="bg-white rounded-lg shadow p-5 mb-6">
+    <h2 class="font-semibold mb-3">Rules (edit if needed, then click "Clean Data")</h2>
+    <div class="grid md:grid-cols-2 gap-4 text-sm">
+      <div>
+        <label class="block font-medium mb-1">Your allowed car brands (comma-separated)</label>
+        <input id="keepBrands" class="w-full border rounded px-2 py-1"
+          value="Suzuki, Mazda, Mitsubishi, Toyota, Nissan, Honda, Subaru">
+      </div>
+      <div>
+        <label class="block font-medium mb-1">Other car-manufacturer brands to flag (edit this list)</label>
+        <input id="otherCarBrands" class="w-full border rounded px-2 py-1"
+          value="BMW, Mercedes-Benz, Mercedes, Audi, Volkswagen, VW, Ford, Hyundai, Kia, Chevrolet, Peugeot, Renault, Land Rover, Range Rover, Jeep, Volvo, Isuzu, Daihatsu, Mini, Lexus, Infiniti, Acura, Chrysler, Dodge, Fiat, Skoda, Seat, Opel, Citroen, Jaguar, Porsche, Tesla, MG, Proton, Ssangyong">
+        <p class="text-xs text-slate-500 mt-1">This is a starter list — add/remove brands so it matches what's actually in your catalogue.</p>
+      </div>
+      <div>
+        <label class="block font-medium mb-1">Always flag these categories (comma-separated)</label>
+        <input id="removeCategories" class="w-full border rounded px-2 py-1"
+          value="Tyres, German Parts, Service Kits">
+      </div>
+      <div>
+        <label class="block font-medium mb-1">Always flag brand containing (comma-separated)</label>
+        <input id="removeBrandKeywords" class="w-full border rounded px-2 py-1"
+          value="Liqui Moly, LiquiMolly, Liqui-Moly">
+      </div>
+      <div class="flex items-center gap-2 mt-2 md:col-span-2">
+        <input type="checkbox" id="keepBlankAlways" class="w-4 h-4" checked>
+        <label for="keepBlankAlways">Always keep products with no brand set — overrides every other rule for that product</label>
+      </div>
+    </div>
+
+    <div class="border-t mt-4 pt-4">
+      <p class="font-medium text-sm mb-2">Also catch accidental-upload mistakes (optional)</p>
+      <div class="grid md:grid-cols-2 gap-2 text-sm">
+        <label class="flex items-center gap-2"><input type="checkbox" id="chkBadCategory" class="w-4 h-4" checked><span>Category isn't one of your 7 recognized categories (typo from a bad bulk upload)</span></label>
+        <label class="flex items-center gap-2"><input type="checkbox" id="chkNoPrice" class="w-4 h-4" checked><span>Price is missing or 0</span></label>
+        <label class="flex items-center gap-2"><input type="checkbox" id="chkNoName" class="w-4 h-4" checked><span>Name is missing/blank</span></label>
+        <label class="flex items-center gap-2"><input type="checkbox" id="chkDuplicate" class="w-4 h-4"><span>Duplicate — same name + brand as another product</span></label>
+      </div>
+      <p class="text-xs text-slate-500 mt-2">These are separate from the brand/category rules above and apply even to products with no brand set (the "always keep blank brand" box only protects against the brand/category rules, not these).</p>
+    </div>
+
+    <button id="loadBtn" class="mt-4 bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-700">
+      Clean Data
+    </button>
+    <span id="loadStatus" class="ml-3 text-sm text-slate-500"></span>
+  </div>
+
+  <!-- Diagnostics: what's actually in the database, so rules can be tuned to match reality -->
+  <div id="diagnostics" class="hidden bg-white rounded-lg shadow p-5 mb-6">
+    <h2 class="font-semibold mb-1">What's actually in your data</h2>
+    <p class="text-xs text-slate-500 mb-3">If "Matches" comes back as 0, it's usually because the brand/category
+      text stored in Supabase doesn't look like what's typed in the rules above. Use these lists to check spelling
+      and adjust the rule boxes.</p>
+    <div class="grid md:grid-cols-2 gap-4 text-sm">
+      <div>
+        <p class="font-medium mb-1">Brands in your catalogue (<span id="brandCount">0</span> distinct)</p>
+        <div id="brandList" class="max-h-40 overflow-auto border rounded p-2 text-xs text-slate-600 space-y-0.5"></div>
+      </div>
+      <div>
+        <p class="font-medium mb-1">Categories in your catalogue (<span id="catCount">0</span> distinct)</p>
+        <div id="catList" class="max-h-40 overflow-auto border rounded p-2 text-xs text-slate-600 space-y-0.5"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="bg-white rounded-lg shadow p-5 mb-6">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="font-semibold">Matches: <span id="matchCount">0</span> of <span id="totalCount">0</span> products</h2>
+        <div class="text-sm space-x-3">
+          <button id="selectAll" class="text-blue-600 hover:underline">Select all</button>
+          <button id="selectNone" class="text-blue-600 hover:underline">Select none</button>
+        </div>
+      </div>
+      <div class="overflow-auto max-h-[500px] border rounded">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-100 sticky top-0">
+            <tr>
+              <th class="p-2 text-left w-8"></th>
+              <th class="p-2 text-left">Name</th>
+              <th class="p-2 text-left">Brand</th>
+              <th class="p-2 text-left">Category</th>
+              <th class="p-2 text-left">Reason</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-5 mb-6">
+      <h2 class="font-semibold mb-2">What should happen to the checked products?</h2>
+      <div class="flex flex-col sm:flex-row gap-4 mb-4 text-sm">
+        <label class="flex items-start gap-2 border rounded-lg p-3 flex-1 cursor-pointer has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50">
+          <input type="radio" name="action" value="hide" checked class="mt-1">
+          <span>
+            <span class="block font-medium">Hide from the site (recommended)</span>
+            <span class="block text-slate-500 text-xs mt-0.5">Removes them from Home/Shop/Cart immediately. Data stays in Supabase — you can bring any of them back later from the "Currently hidden" list below.</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-2 border rounded-lg p-3 flex-1 cursor-pointer has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
+          <input type="radio" name="action" value="delete" class="mt-1">
+          <span>
+            <span class="block font-medium text-red-700">Delete permanently</span>
+            <span class="block text-slate-500 text-xs mt-0.5">Removes the rows from Supabase entirely. Cannot be undone.</span>
+          </span>
+        </label>
+      </div>
+
+      <div id="hideConfirmRow" class="flex items-center gap-3">
+        <button id="applyBtn" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700">
+          Hide checked products
+        </button>
+        <span id="applyStatus" class="text-sm text-slate-500"></span>
+      </div>
+
+      <div id="deleteConfirmRow" class="hidden items-center gap-3 mt-2">
+        <input id="confirmText" class="border rounded px-2 py-1" placeholder="Type DELETE">
+        <span class="text-xs text-slate-500">Type <code class="bg-slate-100 px-1 rounded">DELETE</code> to enable this button — this cannot be undone.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Currently hidden products, with a way to bring them back -->
+  <div class="bg-white rounded-lg shadow p-5">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="font-semibold">Currently hidden products</h2>
+      <button id="loadHiddenBtn" class="text-blue-600 hover:underline text-sm">Refresh this list</button>
+    </div>
+    <p class="text-xs text-slate-500 mb-3">Products hidden using this tool or from Admin. They're kept in Supabase and can be switched back to visible any time.</p>
+    <div class="overflow-auto max-h-[400px] border rounded">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-100 sticky top-0">
+          <tr>
+            <th class="p-2 text-left">Name</th>
+            <th class="p-2 text-left">Brand</th>
+            <th class="p-2 text-left">Category</th>
+            <th class="p-2 text-left w-28"></th>
+          </tr>
+        </thead>
+        <tbody id="hiddenTableBody"><tr><td class="p-3 text-slate-400" colspan="4">Click "Refresh this list" to load.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SUPABASE_URL = 'https://rzhftdmumvfjspijynfd.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_JlwCsJ-u6Ge47XRQEfhB4A_Sddc_Tb6';
+const SUPABASE_REST = `${SUPABASE_URL}/rest/v1`;
+
+function sbHeaders(extra) {
+  return { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, ...extra };
+}
+
+async function fetchAllProducts() {
+  // PostgREST caps rows per request (often 1000, sometimes lower depending on
+  // project config) and returns a normal 200 with just that page — no error,
+  // no warning. If we only send one request, we silently miss everything
+  // past the cap. So we page through with Range headers until a page comes
+  // back smaller than the page size, meaning we've hit the end.
+  const pageSize = 1000;
+  let allProducts = [];
+  let from = 0;
+
+  while (true) {
+    const res = await fetch(`${SUPABASE_REST}/products?select=*&order=id.asc`, {
+      headers: sbHeaders({ Range: `${from}-${from + pageSize - 1}` })
+    });
+    if (!res.ok) throw new Error(`Failed to load products (${res.status})`);
+    const page = await res.json();
+    allProducts = allProducts.concat(page);
+    if (page.length < pageSize) break; // last page
+    from += pageSize;
+  }
+
+  return allProducts;
+}
+
+async function deleteProductIds(ids) {
+  const chunkSize = 50;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const res = await fetch(`${SUPABASE_REST}/products?id=in.(${chunk.join(',')})`, {
+      method: 'DELETE',
+      headers: sbHeaders()
+    });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).message || ''; } catch (e) {}
+      throw new Error(`Delete failed (${res.status}) ${detail}. If this mentions "active" or a missing column, your database needs the "active" column added first — see SUPABASE_SETUP.md.`);
+    }
+  }
+}
+
+async function setProductsActive(ids, active) {
+  const chunkSize = 50;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const res = await fetch(`${SUPABASE_REST}/products?id=in.(${chunk.join(',')})`, {
+      method: 'PATCH',
+      headers: sbHeaders({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+      body: JSON.stringify({ active })
+    });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).message || ''; } catch (e) {}
+      throw new Error(`Update failed (${res.status}) ${detail}. If this mentions an unknown column "active", you need to run the one-time SQL in SUPABASE_SETUP.md first (Supabase → SQL Editor): alter table products add column if not exists active boolean not null default true;`);
+    }
+  }
+}
+
+const RECOGNIZED_CATEGORIES = ['Suspension Parts', 'Service Parts', 'Engine Parts', 'German Parts', 'Service Kits', 'Car Batteries', 'Tyres'];
+
+// Collapses any run of whitespace (double spaces, tabs, non-breaking spaces,
+// etc.) down to a single normal space. Data pasted from Excel/PDF catalogs
+// often has irregular whitespace that looks fine on screen but breaks exact
+// substring matching, e.g. "Liqui  Moly" (double space) silently failing to
+// match a rule of "Liqui Moly" (single space).
+function normalizeSpaces(str) {
+  return str.replace(/\s+/g, ' ').trim();
+}
+
+function parseList(str) {
+  return str.split(',').map(s => normalizeSpaces(s).toLowerCase()).filter(Boolean);
+}
+
+// Strips everything down to just lowercase letters — ignores spaces,
+// punctuation, hyphens, case — so "Liqui-Moly", "LIQUI MOLY", and
+// "LiquiMolly" all normalize to comparable letter strings.
+function onlyLetters(str) {
+  return str.toLowerCase().replace(/[^a-z]/g, '');
+}
+
+// Standard edit-distance calculation: minimum number of single-letter
+// insertions/deletions/substitutions to turn string a into string b.
+function levenshteinDistance(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const curr = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+// 1.0 = identical, 0.0 = completely different.
+function fuzzySimilarity(a, b) {
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  return 1 - levenshteinDistance(a, b) / maxLen;
+}
+
+// Fuzzy match: is `term` at least 70% letter-similar to some part of
+// `brandLower`? Catches typos/spelling variants (e.g. rule "Liqui Moly"
+// matching stored brand "Liqu Moly" or "LiquiMolly Oils") that an exact
+// substring match would silently miss.
+function brandMatchesAny(brandLower, list) {
+  const brandLetters = onlyLetters(brandLower);
+  const FUZZY_THRESHOLD = 0.7;
+  return list.some(term => {
+    if (!term) return false;
+    const termLetters = onlyLetters(term);
+    if (!termLetters) return false;
+    if (brandLetters.includes(termLetters)) return true; // fast path: exact match
+    const termLen = termLetters.length;
+    const minWin = Math.max(1, Math.floor(termLen * 0.6));
+    const maxWin = Math.ceil(termLen * 1.4);
+    for (let start = 0; start <= brandLetters.length - minWin; start++) {
+      const limit = Math.min(maxWin, brandLetters.length - start);
+      for (let wlen = minWin; wlen <= limit; wlen++) {
+        const window = brandLetters.substr(start, wlen);
+        if (fuzzySimilarity(window, termLetters) >= FUZZY_THRESHOLD) return true;
+      }
+    }
+    return false;
+  });
+}
+
+let currentMatches = [];
+let lastLoadedProducts = [];
+
+document.getElementById('loadBtn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('loadStatus');
+  statusEl.textContent = 'Loading…';
+  try {
+    const keepBrands = parseList(document.getElementById('keepBrands').value);
+    const otherCarBrands = parseList(document.getElementById('otherCarBrands').value);
+    const removeCategories = parseList(document.getElementById('removeCategories').value);
+    const removeBrandKeywords = parseList(document.getElementById('removeBrandKeywords').value);
+    const keepBlankAlways = document.getElementById('keepBlankAlways').checked;
+    const chkBadCategory = document.getElementById('chkBadCategory').checked;
+    const chkNoPrice = document.getElementById('chkNoPrice').checked;
+    const chkNoName = document.getElementById('chkNoName').checked;
+    const chkDuplicate = document.getElementById('chkDuplicate').checked;
+
+    const products = await fetchAllProducts();
+    lastLoadedProducts = products;
+    document.getElementById('totalCount').textContent = products.length;
+
+    const matchesById = new Map(); // id -> { ...product, reasons: [] }
+    function flag(p, reason) {
+      if (!matchesById.has(p.id)) matchesById.set(p.id, { ...p, reasons: [] });
+      matchesById.get(p.id).reasons.push(reason);
+    }
+
+    for (const p of products) {
+      if (p.active === false) continue; // already hidden, nothing to do
+      const brand = normalizeSpaces(p.brand || '');
+      const brandLower = brand.toLowerCase();
+      const category = normalizeSpaces(p.category || '');
+      const categoryLower = category.toLowerCase();
+
+      // Brand/category rules — skipped entirely for blank-brand products
+      // when "always keep blank brand" is on.
+      const skipBrandRules = !brandLower && keepBlankAlways;
+      if (!skipBrandRules) {
+        if (brandLower && brandMatchesAny(brandLower, removeBrandKeywords)) {
+          flag(p, `Matches brand keyword: ${brand}`);
+        }
+        if (removeCategories.includes(categoryLower)) {
+          flag(p, `Category: ${p.category}`);
+        }
+        if (brandLower && !keepBrands.includes(brandLower) && brandMatchesAny(brandLower, otherCarBrands)) {
+          flag(p, `Competing car brand: ${brand}`);
+        }
+      }
+
+      // Accidental-upload checks — these apply regardless of brand, since
+      // they're about data integrity, not about which car brand it is.
+      if (chkBadCategory) {
+        if (!category) flag(p, 'Category is missing');
+        else if (!RECOGNIZED_CATEGORIES.includes(category)) flag(p, `Unrecognized category: "${p.category}"`);
+      }
+      if (chkNoPrice && (p.price === null || p.price === undefined || Number(p.price) === 0)) {
+        flag(p, 'Price is missing or 0');
+      }
+      if (chkNoName && !((p.name || '').trim())) {
+        flag(p, 'Name is blank');
+      }
+    }
+
+    if (chkDuplicate) {
+      const groups = new Map(); // "name|brand" -> [products] (active only, sorted by id)
+      products.filter(p => p.active !== false).forEach(p => {
+        const key = `${normalizeSpaces(p.name || '').toLowerCase()}|${normalizeSpaces(p.brand || '').toLowerCase()}`;
+        if (!key.trim().replace('|', '')) return; // skip fully blank name+brand
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(p);
+      });
+      groups.forEach(group => {
+        if (group.length < 2) return;
+        const sorted = [...group].sort((a, b) => a.id - b.id);
+        // Keep the first (oldest) one untouched, flag the rest as duplicates of it.
+        for (let i = 1; i < sorted.length; i++) {
+          flag(sorted[i], `Duplicate of product #${sorted[0].id} (same name + brand)`);
+        }
+      });
+    }
+
+    currentMatches = [...matchesById.values()];
+
+    renderTable();
+    renderDiagnostics(products);
+    document.getElementById('results').classList.remove('hidden');
+    document.getElementById('diagnostics').classList.remove('hidden');
+    statusEl.textContent = `Loaded ${products.length} products.`;
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+});
+
+function renderDiagnostics(products) {
+  const brandCounts = {};
+  const catCounts = {};
+  products.forEach(p => {
+    const b = (p.brand || '').trim() || '(blank)';
+    const c = (p.category || '').trim() || '(blank)';
+    brandCounts[b] = (brandCounts[b] || 0) + 1;
+    catCounts[c] = (catCounts[c] || 0) + 1;
+  });
+  const brandEntries = Object.entries(brandCounts).sort((a, b) => b[1] - a[1]);
+  const catEntries = Object.entries(catCounts).sort((a, b) => b[1] - a[1]);
+
+  document.getElementById('brandCount').textContent = brandEntries.length;
+  document.getElementById('catCount').textContent = catEntries.length;
+  document.getElementById('brandList').innerHTML = brandEntries.map(([b, n]) => `<div>${escapeHtml(b)} <span class="text-slate-400">(${n})</span></div>`).join('');
+  document.getElementById('catList').innerHTML = catEntries.map(([c, n]) => `<div>${escapeHtml(c)} <span class="text-slate-400">(${n})</span></div>`).join('');
+}
+
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  document.getElementById('matchCount').textContent = currentMatches.length;
+
+  for (const p of currentMatches) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-t';
+    tr.innerHTML = `
+      <td class="p-2"><input type="checkbox" class="rowCheck w-4 h-4" data-id="${p.id}" checked></td>
+      <td class="p-2">${escapeHtml(p.name)}</td>
+      <td class="p-2">${escapeHtml(p.brand || '—')}</td>
+      <td class="p-2">${escapeHtml(p.category || '—')}</td>
+      <td class="p-2 text-slate-600">${escapeHtml(p.reasons.join('; '))}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('.rowCheck').forEach(cb => cb.addEventListener('change', () => {}));
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+document.getElementById('selectAll').addEventListener('click', () => {
+  document.querySelectorAll('.rowCheck').forEach(cb => cb.checked = true);
+});
+document.getElementById('selectNone').addEventListener('click', () => {
+  document.querySelectorAll('.rowCheck').forEach(cb => cb.checked = false);
+});
+
+// Action mode: hide (default, reversible) vs delete (permanent)
+document.querySelectorAll('input[name="action"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    const isDelete = document.querySelector('input[name="action"]:checked').value === 'delete';
+    document.getElementById('hideConfirmRow').classList.toggle('hidden', isDelete);
+    document.getElementById('deleteConfirmRow').classList.toggle('hidden', !isDelete);
+    document.getElementById('deleteConfirmRow').classList.toggle('flex', isDelete);
+    document.getElementById('applyStatus').textContent = '';
+  });
+});
+
+document.getElementById('confirmText').addEventListener('input', (e) => {
+  // A DELETE-mode confirm button is created on demand below; this just
+  // tracks whether typing matches, checked at click time via getDeleteBtn().
+});
+
+function getOrCreateDeleteBtn() {
+  let btn = document.getElementById('deleteBtn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'deleteBtn';
+    btn.textContent = 'Delete checked products';
+    btn.disabled = true;
+    btn.className = 'bg-red-600 text-white px-4 py-2 rounded opacity-50 cursor-not-allowed';
+    document.getElementById('deleteConfirmRow').appendChild(btn);
+    btn.addEventListener('click', () => runAction('delete'));
+    document.getElementById('confirmText').addEventListener('input', (e) => {
+      const enabled = e.target.value === 'DELETE';
+      btn.disabled = !enabled;
+      btn.className = enabled
+        ? 'bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700'
+        : 'bg-red-600 text-white px-4 py-2 rounded opacity-50 cursor-not-allowed';
+    });
+  }
+  return btn;
+}
+getOrCreateDeleteBtn();
+
+document.getElementById('applyBtn').addEventListener('click', () => runAction('hide'));
+
+async function runAction(mode) {
+  const statusEl = document.getElementById('applyStatus');
+  const ids = Array.from(document.querySelectorAll('.rowCheck:checked')).map(cb => Number(cb.dataset.id));
+  if (!ids.length) { statusEl.textContent = 'Nothing checked.'; return; }
+
+  if (mode === 'hide') {
+    if (!confirm(`Hide ${ids.length} products from the site? They'll stay in Supabase and can be brought back from the "Currently hidden" list.`)) return;
+    statusEl.textContent = `Hiding ${ids.length} products…`;
+    try {
+      await setProductsActive(ids, false);
+      statusEl.textContent = `Done. Hidden ${ids.length} products.`;
+      currentMatches = currentMatches.filter(p => !ids.includes(p.id));
+      renderTable();
+      loadHiddenProducts();
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+    }
+  } else {
+    if (!confirm(`Really PERMANENTLY delete ${ids.length} products? This cannot be undone.`)) return;
+    statusEl.textContent = `Deleting ${ids.length} products…`;
+    try {
+      await deleteProductIds(ids);
+      statusEl.textContent = `Done. Deleted ${ids.length} products.`;
+      currentMatches = currentMatches.filter(p => !ids.includes(p.id));
+      renderTable();
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+    }
+  }
+}
+
+/* ---------- Currently hidden products ---------- */
+
+async function loadHiddenProducts() {
+  const tbody = document.getElementById('hiddenTableBody');
+  tbody.innerHTML = `<tr><td class="p-3 text-slate-400" colspan="4">Loading…</td></tr>`;
+  try {
+    const res = await fetch(`${SUPABASE_REST}/products?select=*&active=eq.false&order=id.asc`, { headers: sbHeaders() });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = (await res.json()).message || ''; } catch (e) {}
+      throw new Error(`Could not load hidden products (${res.status}) ${detail}. If this mentions an unknown column "active", run the one-time SQL from SUPABASE_SETUP.md first.`);
+    }
+    const rows = await res.json();
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td class="p-3 text-slate-400" colspan="4">No products are currently hidden.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = rows.map(p => `
+      <tr class="border-t">
+        <td class="p-2">${escapeHtml(p.name)}</td>
+        <td class="p-2">${escapeHtml(p.brand || '—')}</td>
+        <td class="p-2">${escapeHtml(p.category || '—')}</td>
+        <td class="p-2 text-right"><button class="unhideBtn text-blue-600 hover:underline text-xs" data-id="${p.id}">Unhide</button></td>
+      </tr>
+    `).join('');
+    tbody.querySelectorAll('.unhideBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Unhiding…';
+        try {
+          await setProductsActive([Number(btn.dataset.id)], true);
+          loadHiddenProducts();
+        } catch (err) {
+          alert('Could not unhide this product.\n\n' + err.message);
+          btn.disabled = false;
+          btn.textContent = 'Unhide';
+        }
+      });
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td class="p-3 text-red-600" colspan="4">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+document.getElementById('loadHiddenBtn').addEventListener('click', loadHiddenProducts);
+</script>
+</body>
+</html>

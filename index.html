@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kilo Auto Spares Ltd — Witu Rd, Brunei House</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans">
+
+    <div id="topBars"></div>
+    <div id="siteHeader"></div>
+
+    <!-- Hero -->
+    <section class="bg-gradient-to-r from-slate-950 via-slate-900 to-red-950 text-white py-16 px-4 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto text-center">
+            <span class="bg-red-500/10 text-red-400 text-xs font-semibold px-3 py-1 rounded-full border border-red-500/20 uppercase tracking-widest">Home of Quality, Durable and Affordable Parts</span>
+            <h1 class="text-4xl sm:text-6xl font-black tracking-tight mt-4 mb-4">Kilo Auto Spares Ltd</h1>
+            <p class="text-slate-400 text-lg max-w-2xl mx-auto mb-8">Search our full catalogue and confirm stock availability instantly via call or WhatsApp. Visit our shop at Witu Road, off Lusaka Road, Brunei House.</p>
+            <div class="flex flex-wrap justify-center gap-4">
+                <a href="shop.html" class="bg-red-600 hover:bg-red-700 text-white font-bold px-8 py-3.5 rounded-lg shadow-lg transition inline-flex items-center space-x-2">
+                    <span>Browse Full Catalogue</span>
+                    <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Product Showcase -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
+        <div class="mb-8 text-center">
+            <h2 class="text-2xl sm:text-3xl font-bold text-slate-900">Parts In Stock</h2>
+            <p class="text-sm text-slate-500 mt-1">A quick look at what we stock — use the search bar above to find a specific part, or browse the full catalogue.</p>
+        </div>
+        <div id="productGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"></div>
+        <div class="text-center mt-10">
+            <a href="shop.html" class="inline-flex items-center space-x-2 bg-slate-900 hover:bg-red-600 text-white font-bold px-6 py-3 rounded-lg shadow transition">
+                <span>View Full Catalogue</span>
+                <i class="fa-solid fa-arrow-right"></i>
+            </a>
+        </div>
+    </main>
+
+    <div id="cartDrawerContainer"></div>
+    <div id="quickViewContainer"></div>
+    <div id="floatingWhatsApp"></div>
+    <div id="siteFooter"></div>
+
+    <script src="supabase.js"></script>
+    <script src="products.js"></script>
+    <script src="layout.js"></script>
+    <script src="cart.js"></script>
+    <script>
+        initLayout('index.html');
+
+        function renderProductCard(product) {
+            const pct = discountPercent(product);
+            return `
+                <div class="rail-card-static bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col hover:border-red-300 hover:shadow-md transition shadow-sm">
+                    <div class="aspect-[3/2] overflow-hidden bg-slate-100 relative group">
+                        <img src="${product.image}" alt="${product.name}" class="w-full h-full object-contain opacity-90 group-hover:opacity-100 transition duration-300">
+                        ${product.subcategory ? `<span class="absolute top-3 left-3 bg-slate-900/90 text-white text-xs font-semibold px-2 py-1 rounded shadow">${product.subcategory}</span>` : ''}
+                        ${pct > 0 ? `<span class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-${pct}%</span>` : ''}
+                        <button onclick="openQuickView(${product.id})" class="absolute inset-x-3 bottom-3 bg-slate-900/90 hover:bg-slate-900 text-white text-xs font-semibold py-2 rounded-lg opacity-0 group-hover:opacity-100 transition flex items-center justify-center space-x-1.5 border border-slate-800">
+                            <i class="fa-solid fa-eye"></i><span>Quick View</span>
+                        </button>
+                    </div>
+                    <div class="p-4 flex-1 flex flex-col justify-between">
+                        <div>
+                            ${product.brand ? `<span class="text-xs text-slate-500 font-semibold uppercase tracking-wide">${product.brand}</span>` : ''}
+                            <h3 class="font-semibold text-slate-900 mt-1 mb-2 text-sm leading-snug line-clamp-2">${product.name}</h3>
+                            <p class="mb-3">${priceHTML(product)}</p>
+                        </div>
+                        <button onclick="addToCart(${product.id})" class="w-full bg-slate-900 hover:bg-red-600 text-white py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-cart-plus"></i>
+                            <span>Add to Inquiry Cart</span>
+                        </button>
+                    </div>
+                </div>`;
+        }
+
+        async function renderHomeProducts() {
+            const products = await loadProducts();
+            document.getElementById('productGrid').innerHTML = products.slice(0, 12).map(renderProductCard).join('');
+        }
+
+        renderHomeProducts();
+    </script>
+</body>
+</html>

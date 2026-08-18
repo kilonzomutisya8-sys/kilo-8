@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Us — Kilo Auto Spares Ltd</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans">
+
+    <div id="topBars"></div>
+    <div id="siteHeader"></div>
+
+    <section class="bg-gradient-to-r from-slate-950 via-slate-900 to-red-950 text-white py-16 px-4 border-b border-slate-800">
+        <div class="max-w-4xl mx-auto text-center">
+            <span class="bg-red-500/10 text-red-400 text-xs font-semibold px-3 py-1 rounded-full border border-red-500/20 uppercase tracking-widest">About Us</span>
+            <h1 class="text-3xl sm:text-5xl font-black tracking-tight mt-4 mb-4">Who We Are</h1>
+            <p class="text-slate-400 text-lg">Kilo Auto Spares Ltd has been keeping Nairobi's vehicles on the road with quality, durable and affordable parts.</p>
+        </div>
+    </section>
+
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-14 space-y-14">
+
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
+            <div>
+                <h2 class="text-2xl font-bold text-slate-900 mb-4">Our Story</h2>
+                <p class="text-slate-600 leading-relaxed mb-4">Kilo Auto Spares Ltd is based on Witu Road, off Lusaka Road, at Brunei House in Nairobi. We stock a wide range of spare parts for both Japanese and European vehicles, from suspension and braking systems to engine filters and electrical components.</p>
+                <p class="text-slate-600 leading-relaxed">Our goal is simple: help drivers, mechanics and garages find the right part, at a fair price, without the guesswork. Every part we sell is chosen for reliability, so you get quality that lasts — not just the cheapest option on the shelf.</p>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <img src="https://images.unsplash.com/photo-1486006920555-c77dce18193b?w=800&q=80" alt="Auto spares workshop" class="w-full h-72 object-cover">
+            </div>
+        </section>
+
+        <section>
+            <h2 class="text-2xl font-bold text-slate-900 mb-6 text-center">Why Choose Us</h2>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div class="bg-white border border-slate-200 rounded-xl p-6 text-center shadow-sm hover:border-red-300 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-lg bg-red-600/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+                        <i class="fa-solid fa-shield-check text-red-500 text-xl"></i>
+                    </div>
+                    <h3 class="font-semibold text-slate-900 mb-2">Quality & Durability</h3>
+                    <p class="text-sm text-slate-500">We stock trusted brands built to last, not the cheapest knock-offs.</p>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-xl p-6 text-center shadow-sm hover:border-red-300 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-lg bg-emerald-600/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-4">
+                        <i class="fa-brands fa-whatsapp text-emerald-500 text-xl"></i>
+                    </div>
+                    <h3 class="font-semibold text-slate-900 mb-2">Instant Confirmation</h3>
+                    <p class="text-sm text-slate-500">Check stock and pricing in minutes over a call or WhatsApp message.</p>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-xl p-6 text-center shadow-sm hover:border-red-300 hover:shadow-md transition">
+                    <div class="w-12 h-12 rounded-lg bg-red-600/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+                        <i class="fa-solid fa-truck-fast text-red-500 text-xl"></i>
+                    </div>
+                    <h3 class="font-semibold text-slate-900 mb-2">Fast Delivery</h3>
+                    <p class="text-sm text-slate-500">Free delivery available on select orders across Nairobi.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-slate-900 border border-slate-800 rounded-xl p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
+            <div>
+                <h2 class="text-xl font-bold text-white mb-1">Visit Us or Reach Out</h2>
+                <p class="text-slate-400 text-sm">Witu Road, Off Lusaka Road, Brunei House, Nairobi</p>
+            </div>
+            <div class="flex gap-3">
+                <a href="tel:0725789415" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-5 py-3 rounded-lg transition inline-flex items-center space-x-2">
+                    <i class="fa-solid fa-phone text-red-500"></i><span>Call Us</span>
+                </a>
+                <a id="aboutWaLink" href="#" target="_blank" rel="noopener" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-5 py-3 rounded-lg transition inline-flex items-center space-x-2">
+                    <i class="fa-brands fa-whatsapp"></i><span>WhatsApp</span>
+                </a>
+            </div>
+        </section>
+
+    </main>
+
+    <div id="cartDrawerContainer"></div>
+    <div id="quickViewContainer"></div>
+    <div id="floatingWhatsApp"></div>
+    <div id="siteFooter"></div>
+
+    <script src="supabase.js"></script>
+    <script src="products.js"></script>
+    <script src="layout.js"></script>
+    <script src="cart.js"></script>
+    <script>
+        initLayout('about.html');
+        document.getElementById('aboutWaLink').href = waLink("Hello, I'd like to know more about Kilo Auto Spares Ltd.");
+    </script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shop — Kilo Auto Spares Ltd</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans">
+
+    <div id="topBars"></div>
+    <div id="siteHeader"></div>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <p id="resultsSummary" class="text-sm text-slate-500 mb-6"></p>
+
+        <!-- Product Grid -->
+        <div id="productGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"></div>
+    </main>
+
+    <div id="cartDrawerContainer"></div>
+    <div id="quickViewContainer"></div>
+    <div id="floatingWhatsApp"></div>
+    <div id="siteFooter"></div>
+
+    <script src="supabase.js"></script>
+    <script src="products.js"></script>
+    <script src="layout.js"></script>
+    <script src="cart.js"></script>
+    <script>
+        initLayout('shop.html');
+
+        let searchQuery = '';
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('q')) searchQuery = params.get('q');
+
+        function productCard(product) {
+            const pct = discountPercent(product);
+            return `
+                <div class="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col hover:border-red-300 hover:shadow-md transition shadow-sm">
+                    <div class="aspect-[3/2] overflow-hidden bg-slate-100 relative group">
+                        <img src="${product.image}" alt="${product.name}" class="w-full h-full object-contain opacity-90 group-hover:opacity-100 transition duration-300">
+                        ${product.subcategory ? `<span class="absolute top-3 left-3 bg-slate-900/90 text-white text-xs font-semibold px-2 py-1 rounded shadow">${product.subcategory}</span>` : ''}
+                        ${pct > 0 ? `<span class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-${pct}%</span>` : ''}
+                        <button onclick="openQuickView(${product.id})" class="absolute inset-x-3 bottom-3 bg-slate-900/90 hover:bg-slate-900 text-white text-xs font-semibold py-2 rounded-lg opacity-0 group-hover:opacity-100 transition flex items-center justify-center space-x-1.5 border border-slate-800">
+                            <i class="fa-solid fa-eye"></i><span>Quick View</span>
+                        </button>
+                    </div>
+                    <div class="p-5 flex-1 flex flex-col justify-between">
+                        <div>
+                            ${product.brand ? `<span class="text-xs text-slate-500 font-semibold uppercase tracking-wide">${product.brand}</span>` : ''}
+                            <h3 class="font-semibold text-slate-900 mt-1 mb-1 text-base leading-snug">${product.name}</h3>
+                            ${product.description ? `<p class="text-xs text-slate-500 mb-2 line-clamp-2">${product.description}</p>` : ''}
+                            <p class="mb-4">${priceHTML(product)}</p>
+                        </div>
+                        <div class="space-y-2">
+                            <button onclick="addToCart(${product.id})" class="w-full bg-slate-900 hover:bg-red-600 text-white py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-2">
+                                <i class="fa-solid fa-cart-plus"></i>
+                                <span>Add to Inquiry Cart</span>
+                            </button>
+                            <a href="${waLink(`Hello, is this part available? - ${product.name}${priceForWhatsApp(product)}`)}" target="_blank" rel="noopener" class="w-full bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white py-2 px-3 rounded-lg text-xs font-semibold transition flex items-center justify-center space-x-2 border border-emerald-200">
+                                <i class="fa-brands fa-whatsapp"></i>
+                                <span>Confirm Availability</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        async function renderProducts() {
+            const products = await loadProducts();
+            const productGrid = document.getElementById('productGrid');
+            const summary = document.getElementById('resultsSummary');
+
+            const filtered = searchProducts(products, searchQuery);
+
+            summary.textContent = searchQuery
+                ? `${filtered.length} result${filtered.length === 1 ? '' : 's'} for "${searchQuery}"`
+                : `Showing all ${filtered.length} parts — search above to narrow it down.`;
+
+            if (filtered.length === 0) {
+                productGrid.innerHTML = `<div class="col-span-full text-center py-16 text-slate-400"><i class="fa-solid fa-triangle-exclamation text-3xl mb-2"></i><p>No auto parts found matching "${searchQuery}". Try a different term, or confirm with us on WhatsApp.</p></div>`;
+                return;
+            }
+
+            productGrid.innerHTML = filtered.map(productCard).join('');
+        }
+
+        // The header's search bar (present on every page) is Shop's
+        // live filter — typing here updates the grid immediately.
+        const headerSearchInput = document.getElementById('searchInputHeader');
+        if (headerSearchInput) {
+            headerSearchInput.value = searchQuery;
+            headerSearchInput.addEventListener('input', (e) => {
+                searchQuery = e.target.value;
+                renderProducts();
+            });
+        }
+
+        renderProducts();
+    </script>
+</body>
+</html>
