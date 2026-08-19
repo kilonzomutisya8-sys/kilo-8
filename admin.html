@@ -76,6 +76,9 @@
                 <button onclick="openMissingImagesModal()" class="bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Shows every product with no photo yet, with its Part Number/Brand/Name, so you can upload photos quickly one by one">
                     <i class="fa-solid fa-magnifying-glass"></i> Find Missing Images
                 </button>
+                <button onclick="openImportDescModal()" class="bg-sky-700 hover:bg-sky-600 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Upload a PDF of product descriptions — it matches each one to a product by part number or name so you can review and apply them in bulk">
+                    <i class="fa-solid fa-file-lines"></i> Import Descriptions (PDF)
+                </button>
                 <button id="autoFixCatBtn" onclick="autoFixCategories(this)" class="bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Scans every product and fixes any that ended up filed under the wrong category">
                     <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Fix Categories
                 </button>
@@ -324,10 +327,78 @@
         </div>
     </div>
 
+    <!-- Import Descriptions from PDF Modal -->
+    <div id="importDescModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="closeImportDescModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 overflow-y-auto">
+            <div class="bg-slate-950 border border-slate-800 rounded-xl w-full max-w-4xl my-8">
+                <div class="p-6 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-lg font-bold text-white"><i class="fa-solid fa-file-lines text-sky-500 mr-1"></i> Import Descriptions from PDF</h2>
+                        <p id="idStatusLabel" class="text-xs text-slate-500 mt-1">Upload a PDF to begin.</p>
+                    </div>
+                    <button onclick="closeImportDescModal()" class="text-slate-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <!-- Step 1: Upload -->
+                <div id="idUploadStep" class="p-6 space-y-4">
+                    <p class="text-xs text-slate-500">Upload a PDF where each product has a title, a "Part No." line, and a description paragraph — the same layout your generated product-description catalog uses. This reads every entry and matches it to a product already in your catalogue by part number or name. You'll review every match before anything is saved — only the <strong>description</strong> field is touched, nothing else about a product changes.</p>
+                    <label id="idDropZone" class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-700 rounded-xl py-10 cursor-pointer hover:border-sky-500 transition">
+                        <i class="fa-solid fa-file-pdf text-3xl text-slate-500"></i>
+                        <span class="text-sm text-slate-400">Click to choose a PDF, or drag it here</span>
+                        <input type="file" accept="application/pdf" class="hidden" id="idFileInput">
+                    </label>
+                    <p id="idUploadError" class="text-xs text-rose-400 hidden"></p>
+                </div>
+
+                <!-- Step 2: Review matches -->
+                <div id="idReviewStep" class="hidden">
+                    <div class="p-6 pb-3 space-y-3 border-b border-slate-800">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                            <div class="bg-slate-900 rounded-lg p-3"><p class="text-lg font-bold text-emerald-400" id="idCountPartNo">0</p><p class="text-[11px] text-slate-500">Matched by Part #</p></div>
+                            <div class="bg-slate-900 rounded-lg p-3"><p class="text-lg font-bold text-sky-400" id="idCountExact">0</p><p class="text-[11px] text-slate-500">Matched by Name</p></div>
+                            <div class="bg-slate-900 rounded-lg p-3"><p class="text-lg font-bold text-amber-400" id="idCountFuzzy">0</p><p class="text-[11px] text-slate-500">Needs Review</p></div>
+                            <div class="bg-slate-900 rounded-lg p-3"><p class="text-lg font-bold text-rose-400" id="idCountNone">0</p><p class="text-[11px] text-slate-500">No Match Found</p></div>
+                        </div>
+                        <div class="flex flex-wrap gap-2 items-center">
+                            <input type="text" id="idSearch" placeholder="Search by PDF title, part number, or matched product..." class="flex-1 min-w-[200px] px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-sky-500 focus:ring-1 focus:ring-sky-500 outline-none transition">
+                            <select id="idFilter" class="px-3 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white outline-none">
+                                <option value="all">All entries</option>
+                                <option value="confident">Confident matches</option>
+                                <option value="fuzzy">Needs review</option>
+                                <option value="none">No match found</option>
+                                <option value="selected">Selected to apply</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="idList" class="divide-y divide-slate-800 max-h-[46vh] overflow-y-auto"></div>
+
+                    <div class="flex items-center justify-between px-6 py-3 border-t border-slate-800">
+                        <button type="button" onclick="idPrevPage()" class="text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed" id="idPrevBtn"><i class="fa-solid fa-chevron-left mr-1"></i> Previous</button>
+                        <span id="idPageLabel" class="text-xs text-slate-500"></span>
+                        <button type="button" onclick="idNextPage()" class="text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed" id="idNextBtn">Next <i class="fa-solid fa-chevron-right ml-1"></i></button>
+                    </div>
+
+                    <div class="p-4 border-t border-slate-800 bg-slate-900/60 flex flex-wrap items-center justify-between gap-3 sticky bottom-0 rounded-b-xl">
+                        <p id="idApplyLabel" class="text-xs text-slate-500">Tick the rows to apply, or select all confident matches at once.</p>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="idSelectConfident()" class="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-2.5 rounded-lg transition whitespace-nowrap">Select Confident Matches</button>
+                            <button type="button" id="idApplyBtn" onclick="idApplySelected()" disabled class="shrink-0 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold px-5 py-2.5 rounded-lg transition inline-flex items-center gap-2 whitespace-nowrap">
+                                <i class="fa-solid fa-cloud-arrow-up"></i> <span id="idApplyBtnLabel">Apply Selected</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.min.js"></script>
     <script src="supabase.js"></script>
     <script src="products.js"></script>
     <script src="admin.js"></script>

@@ -1492,3 +1492,512 @@ async function extractEmbeddedImages(file) {
   }
   return urls;
 }
+
+/* =========================================================
+   Import Descriptions from PDF
+   ---------------------------------------------------------
+   Reads a PDF where every product is laid out like:
+
+       12. Product Title Here
+       Part No. ABC123
+       Brand Some Brand
+       Category Some Category
+       Fits Some Vehicle
+       A paragraph of description text...
+
+   (exactly what the "Download Catalog" companion tool / a
+   generated product-description catalog produces), matches each
+   entry to a product already in the catalogue by part number or
+   name, and lets you review every match before anything is
+   saved. Only the `description` field is ever touched — nothing
+   else about a product (name, price, image, category) changes.
+   ========================================================= */
+
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.worker.min.js';
+}
+
+let idEntries = [];       // parsed PDF entries: { num, title, partNo, brand, category, fits, description }
+let idMatches = new Map(); // entry num -> { productId: number|null, confidence: 'partno'|'exact'|'fuzzy'|'none', selected: boolean }
+let idPage = 0;
+const ID_PAGE_SIZE = 25;
+let idComboOpenFor = null; // entry num currently showing the "change match" search dropdown
+
+function openImportDescModal() {
+  idEntries = [];
+  idMatches = new Map();
+  idPage = 0;
+  document.getElementById('idUploadStep').classList.remove('hidden');
+  document.getElementById('idReviewStep').classList.add('hidden');
+  document.getElementById('idUploadError').classList.add('hidden');
+  document.getElementById('idStatusLabel').textContent = 'Upload a PDF to begin.';
+  document.getElementById('idFileInput').value = '';
+  document.getElementById('importDescModal').classList.remove('hidden');
+}
+window.openImportDescModal = openImportDescModal;
+
+function closeImportDescModal() {
+  document.getElementById('importDescModal').classList.add('hidden');
+}
+window.closeImportDescModal = closeImportDescModal;
+
+/* ---- Step 1: read + parse the PDF ---- */
+
+async function idHandlePdfFile(file) {
+  const errEl = document.getElementById('idUploadError');
+  errEl.classList.add('hidden');
+
+  if (!file || file.type !== 'application/pdf') {
+    errEl.textContent = 'That doesn\'t look like a PDF — please choose a .pdf file.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (typeof pdfjsLib === 'undefined') {
+    errEl.textContent = 'The PDF reader library failed to load (check your internet connection) — try refreshing the page and again.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('idStatusLabel').textContent = 'Reading PDF…';
+
+  try {
+    const text = await idExtractPdfText(file);
+    const entries = idParseDescriptionsText(text);
+    if (entries.length === 0) {
+      errEl.textContent = 'Couldn\'t find any product entries in that PDF. It needs a "Part No." line under each product title, same as the generated description catalog format.';
+      errEl.classList.remove('hidden');
+      document.getElementById('idStatusLabel').textContent = 'Upload a PDF to begin.';
+      return;
+    }
+
+    document.getElementById('idStatusLabel').textContent = 'Matching against your catalogue…';
+    idEntries = entries;
+    idMatches = new Map();
+    const indexes = idBuildProductIndexes();
+    idEntries.forEach(entry => {
+      const result = idMatchEntry(entry, indexes);
+      idMatches.set(entry.num, { productId: result.product ? result.product.id : null, confidence: result.confidence, selected: result.confidence === 'partno' || result.confidence === 'exact' });
+    });
+
+    idPage = 0;
+    document.getElementById('idUploadStep').classList.add('hidden');
+    document.getElementById('idReviewStep').classList.remove('hidden');
+    idRenderReview();
+  } catch (err) {
+    errEl.textContent = 'Could not read that PDF.\n\n' + err.message;
+    errEl.classList.remove('hidden');
+    document.getElementById('idStatusLabel').textContent = 'Upload a PDF to begin.';
+  }
+}
+
+// Extracts text page by page, inserting a newline whenever the
+// vertical position jumps (i.e. a new line of text on the page),
+// which approximates how the source PDF was laid out — needed
+// because the parser below relies on each field sitting on its
+// own line.
+async function idExtractPdfText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    let lastY = null;
+    let pageText = '';
+    content.items.forEach(item => {
+      const y = item.transform[5];
+      if (lastY !== null && Math.abs(y - lastY) > 2) {
+        pageText += '\n';
+      } else if (lastY !== null) {
+        pageText += ' ';
+      }
+      pageText += item.str;
+      lastY = y;
+    });
+    fullText += pageText + '\n';
+  }
+  return fullText;
+}
+
+// Parses text laid out as repeating blocks of:
+//   N. Title (may wrap onto more than one line)
+//   Part No. ...
+//   Brand ...
+//   Category ...
+//   Fits ...
+//   Description paragraph...
+// Entry numbers are required to be strictly sequential (1, 2, 3...)
+// so that a stray "2010." or similar mid-sentence number inside a
+// description paragraph is never mistaken for a new entry — it's
+// simply skipped because it doesn't continue the sequence.
+function idParseDescriptionsText(text) {
+  text = text.replace(/\r\n/g, '\n');
+
+  const candidateRe = /^(\d+)\.\s/gm;
+  const candidates = [];
+  let m;
+  while ((m = candidateRe.exec(text)) !== null) {
+    candidates.push({ pos: m.index, num: parseInt(m[1], 10) });
+  }
+
+  const boundaries = [];
+  let expected = 1;
+  candidates.forEach(c => {
+    if (c.num === expected) { boundaries.push(c.pos); expected += 1; }
+  });
+
+  const fieldRe = /^\d+\.\s+([\s\S]+?)\nPart No\.\s*([^\n]+)\nBrand\s*([^\n]+)\nCategory\s*([^\n]+)\nFits\s*([^\n]+)\n([\s\S]*)$/;
+
+  const entries = [];
+  for (let i = 0; i < boundaries.length; i++) {
+    const start = boundaries[i];
+    const end = i + 1 < boundaries.length ? boundaries[i + 1] : text.length;
+    const block = text.slice(start, end);
+    const fm = fieldRe.exec(block);
+    if (!fm) continue;
+    entries.push({
+      num: i + 1,
+      title: fm[1].replace(/\n/g, ' ').replace(/\s+/g, ' ').trim(),
+      partNo: fm[2].trim(),
+      brand: fm[3].trim(),
+      category: fm[4].trim(),
+      fits: fm[5].trim(),
+      description: idCleanDescription(fm[6])
+    });
+  }
+  return entries;
+}
+
+// Strips a trailing subcategory-heading line that belongs to the
+// NEXT entry (e.g. "Steering Tie Rod End") which otherwise ends up
+// stuck onto this entry's description because it sits right before
+// the next numbered title with no blank-line separator. Real
+// description text always ends in sentence punctuation; a stray
+// heading line doesn't.
+function idCleanDescription(desc) {
+  const lines = desc.replace(/^\n+|\n+$/g, '').split('\n');
+  while (lines.length > 0) {
+    const last = lines[lines.length - 1].trim();
+    if (/[.!?]\s*$/.test(last) || last.length >= 60) break;
+    lines.pop();
+  }
+  return lines.map(l => l.trim()).filter(Boolean).join(' ').trim();
+}
+
+/* ---- Matching entries to existing products ---- */
+
+function idNormalizeText(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+function idNormalizePartNo(s) {
+  return (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function idBuildProductIndexes() {
+  const byPartNo = new Map();
+  const byName = new Map();
+  allProducts.forEach(p => {
+    const pn = idNormalizePartNo(p.partNumber);
+    if (pn) byPartNo.set(pn, p);
+    const nm = idNormalizeText(p.name);
+    if (nm) byName.set(nm, p);
+  });
+  return { byPartNo, byName };
+}
+
+function idMatchEntry(entry, indexes) {
+  const partNoRaw = (entry.partNo || '').trim();
+  if (partNoRaw && partNoRaw.toUpperCase() !== 'N/A') {
+    const pn = idNormalizePartNo(partNoRaw);
+    if (pn) {
+      const hit = indexes.byPartNo.get(pn);
+      if (hit) return { product: hit, confidence: 'partno' };
+    }
+  }
+
+  const titleNorm = idNormalizeText(entry.title);
+  const exactHit = indexes.byName.get(titleNorm);
+  if (exactHit) return { product: exactHit, confidence: 'exact' };
+
+  // Fuzzy fallback: containment or token overlap against every product.
+  // Only runs for entries the fast paths above missed.
+  let best = null;
+  let bestScore = 0;
+  allProducts.forEach(p => {
+    const pn = idNormalizeText(p.name);
+    if (!pn) return;
+    let score;
+    if (titleNorm.includes(pn) || pn.includes(titleNorm)) {
+      score = Math.min(pn.length, titleNorm.length) / Math.max(pn.length, titleNorm.length);
+    } else {
+      const a = new Set(pn.split(' '));
+      const b = new Set(titleNorm.split(' '));
+      let overlap = 0;
+      a.forEach(t => { if (b.has(t)) overlap += 1; });
+      score = overlap / Math.max(a.size, b.size, 1);
+    }
+    if (score > bestScore) { bestScore = score; best = p; }
+  });
+  if (best && bestScore >= 0.6) return { product: best, confidence: 'fuzzy' };
+  return { product: null, confidence: 'none' };
+}
+
+/* ---- Review list rendering ---- */
+
+function idGetFilteredEntries() {
+  const q = (document.getElementById('idSearch').value || '').trim().toLowerCase();
+  const filter = document.getElementById('idFilter').value;
+
+  return idEntries.filter(entry => {
+    const match = idMatches.get(entry.num);
+    const product = match.productId ? allProducts.find(p => p.id === match.productId) : null;
+
+    if (filter === 'confident' && !(match.confidence === 'partno' || match.confidence === 'exact')) return false;
+    if (filter === 'fuzzy' && match.confidence !== 'fuzzy') return false;
+    if (filter === 'none' && match.confidence !== 'none') return false;
+    if (filter === 'selected' && !match.selected) return false;
+
+    if (q) {
+      const haystack = `${entry.title} ${entry.partNo} ${product ? product.name : ''}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function idUpdateCounts() {
+  let partno = 0, exact = 0, fuzzy = 0, none = 0;
+  idMatches.forEach(m => {
+    if (m.confidence === 'partno') partno += 1;
+    else if (m.confidence === 'exact') exact += 1;
+    else if (m.confidence === 'fuzzy') fuzzy += 1;
+    else none += 1;
+  });
+  document.getElementById('idCountPartNo').textContent = partno;
+  document.getElementById('idCountExact').textContent = exact;
+  document.getElementById('idCountFuzzy').textContent = fuzzy;
+  document.getElementById('idCountNone').textContent = none;
+}
+
+const ID_CONFIDENCE_BADGE = {
+  partno: '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full whitespace-nowrap">Part #</span>',
+  exact: '<span class="text-[10px] font-bold uppercase tracking-wide text-sky-400 bg-sky-500/10 border border-sky-500/30 px-2 py-0.5 rounded-full whitespace-nowrap">Exact Name</span>',
+  fuzzy: '<span class="text-[10px] font-bold uppercase tracking-wide text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full whitespace-nowrap">Review</span>',
+  none: '<span class="text-[10px] font-bold uppercase tracking-wide text-rose-400 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded-full whitespace-nowrap">No Match</span>'
+};
+
+function idRenderReview() {
+  idUpdateCounts();
+
+  const filtered = idGetFilteredEntries();
+  const start = idPage * ID_PAGE_SIZE;
+  const pageItems = filtered.slice(start, start + ID_PAGE_SIZE);
+
+  const list = document.getElementById('idList');
+  if (pageItems.length === 0) {
+    list.innerHTML = `<div class="text-center py-10 text-slate-500 text-sm">No entries match this filter.</div>`;
+  } else {
+    list.innerHTML = pageItems.map(entry => {
+      const match = idMatches.get(entry.num);
+      const product = match.productId ? allProducts.find(p => p.id === match.productId) : null;
+      const badge = ID_CONFIDENCE_BADGE[match.confidence];
+
+      return `
+      <div class="p-3 flex flex-wrap items-start gap-3" data-id-entry="${entry.num}">
+        <input type="checkbox" class="mt-1.5 w-4 h-4 accent-emerald-600 shrink-0 id-select-cb" ${match.selected ? 'checked' : ''} ${match.productId ? '' : 'disabled'}>
+        <div class="flex-1 min-w-[220px]">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            ${badge}
+            <span class="text-xs text-slate-500">PDF entry #${entry.num}${entry.partNo && entry.partNo.toUpperCase() !== 'N/A' ? ' · Part# ' + entry.partNo : ''}</span>
+          </div>
+          <p class="text-sm text-white font-medium">${entry.title}</p>
+          <p class="text-xs text-slate-500 mt-1 line-clamp-2 id-desc-preview" title="${entry.description.replace(/"/g, '&quot;')}">${entry.description}</p>
+        </div>
+        <div class="w-full sm:w-64 shrink-0 id-match-area">
+          ${product
+            ? `<div class="bg-slate-900 border border-slate-700 rounded-lg p-2 flex items-center gap-2">
+                 <img src="${product.image || ''}" alt="" class="w-9 h-9 rounded object-cover bg-slate-800 border border-slate-700 shrink-0" onerror="this.style.opacity=0.2">
+                 <div class="flex-1 min-w-0">
+                   <p class="text-xs text-white truncate">${product.name}</p>
+                   <p class="text-[11px] text-slate-500 truncate">${product.partNumber ? 'Part# ' + product.partNumber : product.brand || product.category}</p>
+                 </div>
+                 <button type="button" class="text-slate-500 hover:text-sky-400 p-1 id-change-match-btn" title="Change matched product">
+                   <i class="fa-solid fa-pen"></i>
+                 </button>
+               </div>`
+            : `<button type="button" class="w-full text-xs bg-slate-800 hover:bg-slate-700 text-white font-semibold px-3 py-2.5 rounded-lg transition id-change-match-btn">
+                 <i class="fa-solid fa-magnifying-glass mr-1"></i> Pick a product
+               </button>`
+          }
+          <div class="id-combo-wrap relative"></div>
+        </div>
+      </div>`;
+    }).join('');
+
+    pageItems.forEach(entry => {
+      const row = list.querySelector(`[data-id-entry="${entry.num}"]`);
+      const cb = row.querySelector('.id-select-cb');
+      cb.addEventListener('change', () => {
+        idMatches.get(entry.num).selected = cb.checked;
+        idUpdateApplyUI();
+      });
+      row.querySelector('.id-change-match-btn').addEventListener('click', () => idToggleCombo(entry.num, row));
+    });
+  }
+
+  document.getElementById('idPageLabel').textContent = filtered.length === 0
+    ? ''
+    : `Showing ${start + 1}\u2013${Math.min(start + ID_PAGE_SIZE, filtered.length)} of ${filtered.length}`;
+  document.getElementById('idPrevBtn').disabled = idPage === 0;
+  document.getElementById('idNextBtn').disabled = start + ID_PAGE_SIZE >= filtered.length;
+
+  idUpdateApplyUI();
+}
+
+function idPrevPage() {
+  if (idPage > 0) { idPage -= 1; idRenderReview(); }
+}
+window.idPrevPage = idPrevPage;
+
+function idNextPage() {
+  idPage += 1;
+  idRenderReview();
+}
+window.idNextPage = idNextPage;
+
+// Opens a small inline search box under a row so you can pick a
+// different product for that entry — reuses the same searchProducts()
+// helper the live site's search bar uses.
+function idToggleCombo(entryNum, row) {
+  const wrap = row.querySelector('.id-combo-wrap');
+  if (idComboOpenFor === entryNum) {
+    wrap.innerHTML = '';
+    idComboOpenFor = null;
+    return;
+  }
+  idComboOpenFor = entryNum;
+  wrap.innerHTML = `
+    <div class="absolute right-0 mt-1 w-72 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-10 p-2">
+      <input type="text" placeholder="Search products..." class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white outline-none focus:border-sky-500 id-combo-search">
+      <div class="max-h-52 overflow-y-auto mt-2 space-y-1 id-combo-results"></div>
+    </div>`;
+  const input = wrap.querySelector('.id-combo-search');
+  const results = wrap.querySelector('.id-combo-results');
+
+  const renderResults = (query) => {
+    const hits = query ? searchProducts(allProducts, query).slice(0, 15) : allProducts.slice(0, 15);
+    results.innerHTML = hits.map(p => `
+      <button type="button" data-pick-id="${p.id}" class="w-full text-left flex items-center gap-2 p-1.5 rounded hover:bg-slate-800 transition">
+        <img src="${p.image || ''}" alt="" class="w-7 h-7 rounded object-cover bg-slate-800 border border-slate-700 shrink-0" onerror="this.style.opacity=0.2">
+        <span class="flex-1 min-w-0">
+          <span class="block text-xs text-white truncate">${p.name}</span>
+          <span class="block text-[10px] text-slate-500 truncate">${p.partNumber ? 'Part# ' + p.partNumber : p.brand || p.category}</span>
+        </span>
+      </button>`).join('') || `<p class="text-xs text-slate-500 p-2 text-center">No products found.</p>`;
+    results.querySelectorAll('[data-pick-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = Number(btn.dataset.pickId);
+        const m = idMatches.get(entryNum);
+        m.productId = id;
+        m.confidence = 'fuzzy'; // manually picked — treat as needing-review tier for the counters, but pre-select it
+        m.selected = true;
+        idComboOpenFor = null;
+        idRenderReview();
+      });
+    });
+  };
+  renderResults('');
+  input.addEventListener('input', () => renderResults(input.value.trim()));
+  input.focus();
+}
+
+function idUpdateApplyUI() {
+  const selectedCount = [...idMatches.values()].filter(m => m.selected && m.productId).length;
+  const btn = document.getElementById('idApplyBtn');
+  const label = document.getElementById('idApplyBtnLabel');
+  const applyLabel = document.getElementById('idApplyLabel');
+  btn.disabled = selectedCount === 0;
+  label.textContent = selectedCount > 0 ? `Apply Selected (${selectedCount})` : 'Apply Selected';
+  applyLabel.textContent = selectedCount > 0
+    ? `${selectedCount} description${selectedCount === 1 ? '' : 's'} will be saved.`
+    : 'Tick the rows to apply, or select all confident matches at once.';
+}
+
+// Ticks every entry matched by Part Number or exact Name (the two
+// high-confidence tiers) without touching fuzzy/no-match rows — those
+// stay unticked so you consciously review them first.
+function idSelectConfident() {
+  idMatches.forEach(m => {
+    if (m.productId && (m.confidence === 'partno' || m.confidence === 'exact')) m.selected = true;
+  });
+  idRenderReview();
+}
+window.idSelectConfident = idSelectConfident;
+
+/* ---- Apply: writes selected descriptions to Supabase in one batch ---- */
+
+async function idApplySelected() {
+  const toApply = [...idMatches.entries()].filter(([, m]) => m.selected && m.productId);
+  if (toApply.length === 0) return;
+
+  const btn = document.getElementById('idApplyBtn');
+  const label = document.getElementById('idApplyBtnLabel');
+  btn.disabled = true;
+
+  const failed = [];
+  for (let i = 0; i < toApply.length; i++) {
+    const [entryNum, m] = toApply[i];
+    const entry = idEntries.find(e => e.num === entryNum);
+    label.textContent = `Saving ${i + 1} of ${toApply.length}...`;
+    try {
+      const local = allProducts.find(x => x.id === m.productId);
+      if (local) {
+        await sbUpdateProduct(m.productId, { ...local, description: entry.description });
+        local.description = entry.description;
+      }
+      idMatches.delete(entryNum);
+      idEntries = idEntries.filter(e => e.num !== entryNum);
+    } catch (err) {
+      failed.push({ entryNum, message: err.message });
+    }
+  }
+
+  invalidateProductsCache();
+  renderTable();
+
+  if (idEntries.length === 0) {
+    closeImportDescModal();
+    alert(`Done — saved ${toApply.length - failed.length} product description${toApply.length - failed.length === 1 ? '' : 's'}.`);
+  } else {
+    idPage = 0;
+    idRenderReview();
+  }
+
+  if (failed.length > 0) {
+    const names = failed.map(f => `• PDF entry #${f.entryNum}: ${f.message}`).join('\n');
+    alert(`Saved everything except ${failed.length}, which stayed in the list so you can retry:\n\n${names}`);
+  }
+}
+window.idApplySelected = idApplySelected;
+
+/* ---- Wire up file input + drop zone + search/filter ---- */
+
+(function idWireUpImportDescModal() {
+  const fileInput = document.getElementById('idFileInput');
+  const dropZone = document.getElementById('idDropZone');
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) idHandlePdfFile(fileInput.files[0]);
+    });
+  }
+  if (dropZone) {
+    setupDropZone(dropZone, files => {
+      const pdfFile = [...files].find(f => f.type === 'application/pdf');
+      if (pdfFile) idHandlePdfFile(pdfFile);
+    });
+  }
+  const idSearchEl = document.getElementById('idSearch');
+  const idFilterEl = document.getElementById('idFilter');
+  if (idSearchEl) idSearchEl.addEventListener('input', () => { idPage = 0; idRenderReview(); });
+  if (idFilterEl) idFilterEl.addEventListener('change', () => { idPage = 0; idRenderReview(); });
+})();
