@@ -1171,101 +1171,73 @@ function exportProducts() {
 }
 window.exportProducts = exportProducts;
 
-/* ---------- Delete All Images ---------- */
+/* ---------- Download printable product catalog (PDF) ---------- */
 /*
-   Wipes every photo off the live site: deletes every file sitting
-   in the product-images storage bucket, then clears the "image"
-   field on every product and every category tile so nothing points
-   at a now-deleted file. Nothing else is touched — no product,
-   name, price, category, or description is added, changed, or
-   removed. Products simply go back to showing their placeholder
-   icon instead of a photo, exactly like a brand-new product that
-   hasn't had a photo added yet.
+   A simple printable list: every product's name, part number, brand,
+   and category/subcategory (the closest thing this catalogue has to
+   a "car make" — e.g. German Parts products are filed under a
+   subcategory like "BMW Parts" or "Mercedes-Benz Parts"). No prices,
+   photos, or descriptions — just enough to skim or hand to someone
+   over the counter. Includes every product (including ones hidden
+   from the live site), sorted alphabetically by name.
 */
-async function deleteAllImages(btn) {
-  const sure = confirm(
-    'Delete EVERY image on the site?\n\n' +
-    'This removes every uploaded photo from storage and clears the photo ' +
-    'off every product and every category tile. Products themselves are ' +
-    'NOT deleted — only their photos. This cannot be undone.'
-  );
-  if (!sure) return;
-
-  const originalLabel = btn ? btn.innerHTML : null;
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting...';
+function exportCatalogPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('The PDF library failed to load (check your internet connection) — try refreshing the page and again.');
+    return;
+  }
+  if (!allProducts || allProducts.length === 0) {
+    alert('No products to export yet.');
+    return;
   }
 
-  // Each step below only ever touches the `image` column (or storage
-  // files) — never name, brand, category, price, or description — and
-  // each step is wrapped independently so a failure in one (e.g. a
-  // missing storage delete permission) can't stop the others from
-  // completing. That way "Delete All Images" always clears every photo
-  // reference it possibly can, even if actual file deletion from
-  // storage fails.
-  let filesDeletedCount = 0;
-  let storageError = null;
-  let productsCleared = false;
-  let productsError = null;
-  let categoriesCleared = false;
+  const rows = allProducts
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((p, i) => [
+      i + 1,
+      p.name || '',
+      p.partNumber || '—',
+      p.brand || '—',
+      p.subcategory || p.category || '—'
+    ]);
 
-  // 1) Delete the actual uploaded files from storage.
-  try {
-    const files = await sbListAllImages();
-    if (files.length > 0) {
-      await sbDeleteImages(files);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+
+  doc.setFontSize(16);
+  doc.setFont(undefined, 'bold');
+  doc.text('Kilo Auto Spares Ltd — Product Catalog', 40, 40);
+  doc.setFontSize(9);
+  doc.setFont(undefined, 'normal');
+  doc.text(`Generated ${new Date().toLocaleDateString()} — ${rows.length} products — Witu Rd, Brunei House, Nairobi`, 40, 56);
+
+  doc.autoTable({
+    startY: 72,
+    head: [['#', 'Product Name', 'Part Number', 'Brand', 'Category / Make']],
+    body: rows,
+    styles: { fontSize: 8, cellPadding: 5, overflow: 'linebreak' },
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] },
+    alternateRowStyles: { fillColor: [245, 245, 245] },
+    columnStyles: {
+      0: { cellWidth: 26, halign: 'right' },
+      1: { cellWidth: 190 },
+      2: { cellWidth: 90 },
+      3: { cellWidth: 90 },
+      4: { cellWidth: 110 }
+    },
+    margin: { left: 40, right: 40 },
+    didDrawPage: () => {
+      const pageCount = doc.internal.getNumberOfPages();
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`, doc.internal.pageSize.getWidth() - 80, doc.internal.pageSize.getHeight() - 20);
     }
-    filesDeletedCount = files.length;
-  } catch (e) {
-    storageError = e;
-    console.warn('Could not delete files from storage.', e);
-  }
+  });
 
-  // 2) Clear the image field on every product (products stay put —
-  //    name/brand/category/price/description are untouched).
-  try {
-    await sbClearAllProductImages();
-    productsCleared = true;
-  } catch (e) {
-    productsError = e;
-    console.warn('Could not clear product image fields.', e);
-  }
-
-  // 3) Clear category tile photos too, if that table exists yet.
-  try {
-    await sbClearAllCategoryImages();
-    categoriesCleared = true;
-  } catch (e) {
-    console.warn('Skipped clearing category tile images (table may not exist yet).', e);
-  }
-
-  invalidateProductsCache();
-  await refreshProducts();
-
-  try {
-    let msg = productsCleared
-      ? `Done. Cleared the photo field on every product${categoriesCleared ? ' and every category tile' : ''}. All product names, prices, and descriptions are untouched.`
-      : `Could not clear product photo fields.\n\n${productsError ? productsError.message : ''}`;
-
-    if (storageError) {
-      const hint = /401|403|permission|rls|policy/i.test(storageError.message)
-        ? ' This is usually because the storage bucket is missing its DELETE policy — see the "Public can delete product images" policy in SUPABASE_SETUP.md, step 4.'
-        : '';
-      msg += `\n\nHowever, the uploaded photo files themselves could NOT be deleted from storage (they'll no longer show anywhere on the site, but still take up storage space).${hint}\n\n(${storageError.message})`;
-    } else {
-      msg += `\n\nDeleted ${filesDeletedCount} uploaded photo${filesDeletedCount === 1 ? '' : 's'} from storage.`;
-    }
-
-    alert(msg);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = originalLabel;
-    }
-  }
+  doc.save(`kilo-auto-spares-catalog-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
-window.deleteAllImages = deleteAllImages;
+window.exportCatalogPDF = exportCatalogPDF;
 
 /* ---------- Bulk upload (XLSX / CSV) ---------- */
 

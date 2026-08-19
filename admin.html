@@ -82,8 +82,8 @@
                 <button onclick="exportProducts()" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2">
                     <i class="fa-solid fa-file-export"></i> Export Backup (JSON)
                 </button>
-                <button id="deleteAllImagesBtn" onclick="deleteAllImages(this)" class="bg-rose-950 hover:bg-rose-800 text-rose-300 hover:text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2 border border-rose-800" title="Deletes every uploaded photo and clears every product's photo field. Products themselves are kept.">
-                    <i class="fa-solid fa-trash"></i> Delete All Images
+                <button onclick="exportCatalogPDF()" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Downloads a printable PDF listing every product's name, part number, brand, and category/make">
+                    <i class="fa-solid fa-file-pdf"></i> Download Catalog (PDF)
                 </button>
                 <button onclick="refreshProducts()" class="bg-slate-800 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition inline-flex items-center gap-2" title="Reload the product list from Supabase">
                     <i class="fa-solid fa-rotate"></i> Refresh
@@ -326,6 +326,8 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <script src="supabase.js"></script>
     <script src="products.js"></script>
     <script src="admin.js"></script>
