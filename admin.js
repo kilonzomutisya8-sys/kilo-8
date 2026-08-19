@@ -1418,39 +1418,55 @@ async function processBulkFile(file) {
       return;
     }
 
+    // Sort the incoming rows alphabetically by name before anything
+    // else, so duplicates that only differ in row order still end up
+    // next to each other and the import/skip messages read in a
+    // predictable, easy-to-scan order.
+    toImport.sort((a, b) => a.name.trim().toLowerCase().localeCompare(b.name.trim().toLowerCase()));
+
     // Match against products already on the site by name (case/space
-    // insensitive) so re-uploading the same file — e.g. after filling
-    // in Image links you didn't have the first time — updates the
-    // existing product instead of creating a duplicate.
+    // insensitive). Anything that already exists — on the site, or
+    // repeated earlier in this same file — is treated as a duplicate
+    // and is NOT written to the site at all (no insert, no update).
     const existingByName = new Map();
     allProducts.forEach(p => existingByName.set(p.name.trim().toLowerCase(), p));
 
+    const seenInFile = new Set();
     const toInsert = [];
-    const toUpdate = [];
+    const duplicates = [];
     const autoHidden = [];
     toImport.forEach(product => {
-      const existing = existingByName.get(product.name.trim().toLowerCase());
-      if (existing) {
-        toUpdate.push({ id: existing.id, product });
-      } else {
-        const hideReason = getAutoHideReason(product);
-        if (hideReason) {
-          product.active = false;
-          autoHidden.push(`"${product.name}": ${hideReason}`);
-        }
-        toInsert.push(product);
+      const key = product.name.trim().toLowerCase();
+
+      if (existingByName.has(key)) {
+        duplicates.push(`"${product.name}": already exists on the site — skipped, not added.`);
+        return;
       }
+      if (seenInFile.has(key)) {
+        duplicates.push(`"${product.name}": appears more than once in this file — only the first one was kept.`);
+        return;
+      }
+      seenInFile.add(key);
+
+      const hideReason = getAutoHideReason(product);
+      if (hideReason) {
+        product.active = false;
+        autoHidden.push(`"${product.name}": ${hideReason}`);
+      }
+      toInsert.push(product);
     });
 
     if (toInsert.length > 0) await sbInsertProducts(toInsert);
-    if (toUpdate.length > 0) await Promise.all(toUpdate.map(u => sbUpdateProduct(u.id, u.product)));
 
     await refreshProducts();
     closeProductModal();
 
     let msg = '';
-    if (toInsert.length > 0) msg += `Added ${toInsert.length} new product${toInsert.length === 1 ? '' : 's'}.\n`;
-    if (toUpdate.length > 0) msg += `Updated ${toUpdate.length} existing product${toUpdate.length === 1 ? '' : 's'} (matched by name) — no duplicates created.\n`;
+    if (toInsert.length > 0) msg += `Added ${toInsert.length} new product${toInsert.length === 1 ? '' : 's'} (each with its name and description).\n`;
+    if (duplicates.length > 0) {
+      msg += `\n\n🚫 ${duplicates.length} duplicate row(s) were refused and NOT added to the site:\n` + duplicates.slice(0, 15).join('\n');
+      if (duplicates.length > 15) msg += `\n...and ${duplicates.length - 15} more`;
+    }
     if (autoHidden.length > 0) {
       msg += `\n\n🙈 ${autoHidden.length} new product${autoHidden.length === 1 ? '' : 's'} matched your always-hide rules and ${autoHidden.length === 1 ? 'was' : 'were'} saved hidden (not shown on the live site or in this Admin list). Find and un-hide them from cleanup-products.html if any of these were wrong:\n` + autoHidden.slice(0, 15).join('\n');
       if (autoHidden.length > 15) msg += `\n...and ${autoHidden.length - 15} more`;
