@@ -19,7 +19,6 @@ let allProducts = [];
 let selectedImageFile = null;
 let bulkPhotoFile = null;
 let bulkPhotoSelectedIds = new Set();
-let bulkDeleteSelectedIds = new Set();
 
 /* ---------- Auto-hide rules for newly added products ---------- */
 // These mirror the default rules in cleanup-products.html. When a
@@ -177,18 +176,6 @@ async function initAdmin() {
         return;
       }
     }
-  });
-
-  document.getElementById('bdCategory').addEventListener('change', updateBulkDeleteSubcategoryOptions);
-  document.getElementById('bdSubcategory').addEventListener('change', renderBulkDeleteProductList);
-  document.getElementById('bdSearch').addEventListener('input', renderBulkDeleteProductList);
-  document.getElementById('bdProductList').addEventListener('change', e => {
-    const checkbox = e.target.closest('input[type="checkbox"][data-product-id]');
-    if (!checkbox) return;
-    const id = Number(checkbox.dataset.productId);
-    if (checkbox.checked) bulkDeleteSelectedIds.add(id);
-    else bulkDeleteSelectedIds.delete(id);
-    updateBulkDeleteMatchCount();
   });
 
   if (!adminInitialized) {
@@ -379,27 +366,31 @@ function closeProductModal() {
 window.closeProductModal = closeProductModal;
 
 // Opens image searches (Google Images / PartSouq) as a small window
-// docked to the right half of the screen, instead of a full new tab,
-// so the Admin page stays visible on the left. That way you can drag
-// an image straight out of the search window onto a drop zone here
-// without downloading it first.
+// docked to the LEFT edge of the screen, instead of a full new tab, so
+// it never sits on top of the Upload/Drop controls in the Admin panel
+// (those live on the right-hand side of each row in Find Missing
+// Images). The Admin window itself is slid over to the right side so
+// both windows sit cleanly side by side. Slightly narrower than half
+// the screen so Google's image grid reflows to fewer columns instead
+// of cramming thumbnails in edge-to-edge and clipping them.
 function openSideSearchWindow(url) {
   const screenW = window.screen.availWidth || 1280;
   const screenH = window.screen.availHeight || 800;
-  const winW = Math.round(screenW / 2);
+  const winW = Math.round(screenW * 0.46);
   const winH = screenH;
-  const left = screenW - winW; // dock to the right edge
+  const left = 0; // dock to the LEFT edge
   const top = 0;
   const features = `width=${winW},height=${winH},left=${left},top=${top},noopener`;
   const win = window.open(url, 'kiloImageSearch', features);
   if (win) {
     win.focus();
-    // Try to slide/shrink the Admin window itself to the left half too,
-    // so both are visible side by side (not all browsers allow this on
-    // an existing window, but it's harmless where it's blocked).
+    // Try to slide/shrink the Admin window itself to the right side,
+    // so both are visible side by side without overlapping (not all
+    // browsers allow this on an existing window, but it's harmless
+    // where it's blocked).
     try {
-      window.resizeTo(left, screenH);
-      window.moveTo(0, 0);
+      window.resizeTo(screenW - winW, screenH);
+      window.moveTo(winW, 0);
     } catch (e) { /* ignore if browser blocks resizing the main window */ }
   } else {
     // Popup blocked — fall back to a normal tab so the search still works.
@@ -556,34 +547,66 @@ window.deleteProductClick = deleteProductClick;
    photo per product. Nothing here searches the internet automatically
    — this is a fast manual-review queue: you find the right photo
    yourself (manufacturer site, your own stock photo, distributor
-   catalogue, etc.), then upload or paste its URL right in the row.
-   Saving updates the product immediately and the row drops off the
-   list, so the list always reflects what's actually still missing.
+   catalogue, etc.), then drag/upload/paste it onto a row.
+
+   Dropping a photo no longer saves instantly — it just "stages" it
+   (shown as a Pending thumbnail on that row). Nothing actually writes
+   to Supabase until you click Save All, so you can drop a dozen
+   photos in a row without waiting on a network round trip each time.
+
+   The list order is captured once, when the modal opens (miOrderIds),
+   and never recomputed from scratch afterwards — rows only ever leave
+   the list (once truly saved), they never shuffle position while
+   you're mid-session.
+
+   You also don't need to aim at a specific row: dropping anywhere in
+   the modal (or anywhere on the page while it's open) that isn't
+   exactly on a row's own "Upload / Drop" control automatically stages
+   the image onto the last product in the list that doesn't have a
+   photo yet AND isn't already staged — so repeated imprecise drops
+   walk backwards up the list on their own.
 */
 
 let miPage = 0;
 const MI_PAGE_SIZE = 50;
+let miPending = new Map(); // productId -> { file: File|null, url: string|null, previewSrc: string }
+let miOrderIds = []; // frozen snapshot of missing-image product ids, captured when the modal opens
+
+// Captures the current order of "no photo yet" products once, so the
+// list has a stable backbone for the rest of this session — see note
+// above.
+function miSnapshotOrder() {
+  miOrderIds = allProducts
+    .filter(p => !p.image || !p.image.trim())
+    .map(p => p.id);
+}
 
 function miGetMissingList() {
   const q = (document.getElementById('miSearch').value || '').trim().toLowerCase();
-  return allProducts.filter(p => {
-    if (p.image && p.image.trim()) return false; // already has a photo
-    if (!q) return true;
-    const haystack = `${p.partNumber || ''} ${p.brand || ''} ${p.name || ''}`.toLowerCase();
-    return haystack.includes(q);
-  });
+  return miOrderIds
+    .map(id => allProducts.find(p => p.id === id))
+    .filter(p => p && (!p.image || !p.image.trim())) // drop anything that's actually been saved since
+    .filter(p => {
+      if (!q) return true;
+      const haystack = `${p.partNumber || ''} ${p.brand || ''} ${p.name || ''}`.toLowerCase();
+      return haystack.includes(q);
+    });
 }
 
 function openMissingImagesModal() {
   miPage = 0;
+  miPending.clear();
+  miSnapshotOrder();
   document.getElementById('miSearch').value = '';
   document.getElementById('missingImagesModal').classList.remove('hidden');
   renderMissingImagesList();
+  miAttachGlobalDropHandler();
 }
 window.openMissingImagesModal = openMissingImagesModal;
 
 function closeMissingImagesModal() {
   document.getElementById('missingImagesModal').classList.add('hidden');
+  miDetachGlobalDropHandler();
 }
 window.closeMissingImagesModal = closeMissingImagesModal;
 
@@ -607,48 +630,48 @@ function renderMissingImagesList() {
       const query = encodeURIComponent(`${p.partNumber || ''} ${p.name} ${p.brand || ''}`.trim().replace(/\s+/g, ' '));
       const googleImagesUrl = `https://www.google.com/search?tbm=isch&q=${query}`;
       const partSouqUrl = `https://partsouq.com/en/search/all?q=${query}`;
+      const staged = miPending.get(p.id);
       return `
-      <div class="p-3 flex items-center gap-3 bg-slate-950" data-mi-id="${p.id}">
-        <img src="" alt="" class="w-12 h-12 rounded object-cover bg-slate-900 border border-slate-800 shrink-0 mi-preview">
-        <div class="flex-1 min-w-0">
+      <div class="p-3 flex flex-wrap items-center gap-3 bg-slate-950" data-mi-id="${p.id}">
+        <img src="${staged ? staged.previewSrc : ''}" alt="" class="w-10 h-10 rounded object-cover bg-slate-900 border border-slate-800 shrink-0 mi-preview">
+        <div class="flex-1 min-w-[160px]">
           <p class="text-sm text-white font-medium truncate">${p.name}</p>
           <p class="text-xs text-slate-500 truncate">${p.partNumber ? 'Part# ' + p.partNumber + ' &middot; ' : ''}${p.brand ? p.brand + ' &middot; ' : ''}${p.category}</p>
-          <div class="flex gap-3 mt-1">
-            <a href="${googleImagesUrl}" onclick="return openSideSearchWindow(this.href);" class="text-[11px] text-blue-400 hover:text-blue-300 font-semibold"><i class="fa-brands fa-google mr-1"></i>Search Google Images</a>
-            <a href="${partSouqUrl}" onclick="return openSideSearchWindow(this.href);" class="text-[11px] text-amber-400 hover:text-amber-300 font-semibold"><i class="fa-solid fa-magnifying-glass mr-1"></i>Search PartSouq</a>
+          <div class="flex gap-3 mt-1 flex-wrap">
+            <a href="${googleImagesUrl}" onclick="return openSideSearchWindow(this.href);" class="text-[11px] text-blue-400 hover:text-blue-300 font-semibold whitespace-nowrap"><i class="fa-brands fa-google mr-1"></i>Google Images</a>
+            <a href="${partSouqUrl}" onclick="return openSideSearchWindow(this.href);" class="text-[11px] text-amber-400 hover:text-amber-300 font-semibold whitespace-nowrap"><i class="fa-solid fa-magnifying-glass mr-1"></i>PartSouq</a>
           </div>
         </div>
+        ${staged ? `
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1.5 rounded-lg whitespace-nowrap"><i class="fa-solid fa-clock mr-1"></i>Pending</span>
+          <button type="button" class="text-slate-400 hover:text-rose-400 p-1.5 mi-unstage-btn" title="Remove this photo before saving"><i class="fa-solid fa-xmark"></i></button>
+        </div>` : `
         <div class="flex items-center gap-2 shrink-0">
           <label class="text-xs bg-slate-800 hover:bg-slate-700 text-white font-semibold px-3 py-2 rounded-lg transition cursor-pointer mi-drop-zone" title="Click to browse, or drag an image here from another window">
             <i class="fa-solid fa-upload mr-1"></i> Upload / Drop
             <input type="file" accept="image/*" class="hidden mi-file-input">
           </label>
-          <input type="text" placeholder="or paste image URL" class="w-40 px-2 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-red-500 outline-none transition mi-url-input">
-          <button class="text-xs bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-3 py-2 rounded-lg transition mi-save-btn" disabled>Save</button>
-        </div>
+          <input type="text" placeholder="or paste image URL" class="w-36 px-2 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:border-red-500 outline-none transition mi-url-input">
+        </div>`}
       </div>
     `;
     }).join('');
 
     pageItems.forEach(p => {
       const row = list.querySelector(`[data-mi-id="${p.id}"]`);
+
+      if (miPending.has(p.id)) {
+        row.querySelector('.mi-unstage-btn').addEventListener('click', () => miUnstage(p.id));
+        return;
+      }
+
       const fileInput = row.querySelector('.mi-file-input');
       const urlInput = row.querySelector('.mi-url-input');
-      const saveBtn = row.querySelector('.mi-save-btn');
-      const preview = row.querySelector('.mi-preview');
       const dropZone = row.querySelector('.mi-drop-zone');
-      let pickedFile = null;
-
-      const usePickedFile = (file) => {
-        pickedFile = file;
-        const reader = new FileReader();
-        reader.onload = ev => { preview.src = ev.target.result; };
-        reader.readAsDataURL(file);
-        saveBtn.disabled = false;
-      };
 
       fileInput.addEventListener('change', () => {
-        if (fileInput.files[0]) usePickedFile(fileInput.files[0]);
+        if (fileInput.files[0]) miStageFile(p.id, fileInput.files[0]);
       });
 
       // Drag an image straight out of another window (e.g. the Google
@@ -658,48 +681,25 @@ function renderMissingImagesList() {
       // (text/uri-list) — handle both instead of assuming.
       setupDropZone(dropZone, files => {
         const imgFile = [...files].find(f => f.type.startsWith('image/'));
-        if (imgFile) usePickedFile(imgFile);
+        if (imgFile) miStageFile(p.id, imgFile);
       });
       dropZone.addEventListener('drop', e => {
-        if (pickedFile) return; // already handled as a real file above
         const uri = e.dataTransfer && e.dataTransfer.getData('text/uri-list');
-        if (uri) {
-          urlInput.value = uri;
-          preview.src = uri;
-          saveBtn.disabled = false;
-        }
-      });
-      urlInput.addEventListener('input', () => {
-        if (pickedFile) return; // a picked file takes priority
-        const url = urlInput.value.trim();
-        saveBtn.disabled = !url;
-        if (url) preview.src = url;
+        if (uri) miStageUrl(p.id, uri);
       });
 
-      saveBtn.addEventListener('click', async () => {
-        saveBtn.disabled = true;
-        try {
-          let imageUrl;
-          if (pickedFile) {
-            saveBtn.textContent = 'Uploading...';
-            imageUrl = await sbUploadImage(pickedFile);
-          } else {
-            const pastedUrl = urlInput.value.trim();
-            if (!pastedUrl) { saveBtn.disabled = false; return; }
-            saveBtn.textContent = 'Downloading...';
-            imageUrl = await sbFetchExternalImage(pastedUrl);
-          }
-          await sbUpdateProduct(p.id, { ...p, image: imageUrl });
-          const local = allProducts.find(x => x.id === p.id);
-          if (local) local.image = imageUrl;
-          invalidateProductsCache();
-          renderTable();
-          renderMissingImagesList(); // row disappears from the list, counters update
-        } catch (err) {
-          alert('Could not save this photo.\n\n' + err.message);
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Save';
+      // Staged on Enter or on leaving the field (not on every
+      // keystroke) so typing/pasting isn't interrupted mid-way.
+      urlInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const url = urlInput.value.trim();
+          if (url) miStageUrl(p.id, url);
         }
+      });
+      urlInput.addEventListener('blur', () => {
+        const url = urlInput.value.trim();
+        if (url) miStageUrl(p.id, url);
       });
     });
   }
@@ -709,6 +709,8 @@ function renderMissingImagesList() {
     : `Showing ${start + 1}\u2013${Math.min(start + MI_PAGE_SIZE, totalMissing)} of ${totalMissing}`;
   document.getElementById('miPrevBtn').disabled = miPage === 0;
   document.getElementById('miNextBtn').disabled = start + MI_PAGE_SIZE >= totalMissing;
+
+  updateMiSaveAllUI();
 }
 
 function miPrevPage() {
@@ -721,6 +723,160 @@ function miNextPage() {
   renderMissingImagesList();
 }
 window.miNextPage = miNextPage;
+
+/* ---- Staging a photo onto a row (no network call yet) ---- */
+
+function miStageFile(id, file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    miPending.set(id, { file, url: null, previewSrc: ev.target.result });
+    renderMissingImagesList();
+    miFlashRow(id);
+  };
+  reader.readAsDataURL(file);
+}
+
+function miStageUrl(id, url) {
+  miPending.set(id, { file: null, url, previewSrc: url });
+  renderMissingImagesList();
+  miFlashRow(id);
+}
+
+function miUnstage(id) {
+  miPending.delete(id);
+  renderMissingImagesList();
+}
+
+// Briefly highlights + scrolls to a row so an auto-targeted drop is
+// obviously confirmed even though it may have landed off-screen.
+function miFlashRow(id) {
+  const row = document.querySelector(`#miList [data-mi-id="${id}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  row.classList.add('ring-2', 'ring-emerald-500');
+  setTimeout(() => row.classList.remove('ring-2', 'ring-emerald-500'), 900);
+}
+
+function updateMiSaveAllUI() {
+  const btn = document.getElementById('miSaveAllBtn');
+  const label = document.getElementById('miSaveAllLabel');
+  const pendingLabel = document.getElementById('miPendingLabel');
+  if (!btn) return;
+  const count = miPending.size;
+  btn.disabled = count === 0;
+  label.textContent = count > 0 ? `Save All (${count})` : 'Save All';
+  pendingLabel.textContent = count > 0
+    ? `${count} photo${count === 1 ? '' : 's'} ready to save.`
+    : 'Drop photos onto the list above — nothing is saved until you click Save All.';
+}
+
+/* ---- Auto-targeting: drop anywhere, it lands on the last product
+   in the list that still needs a photo and isn't already staged ---- */
+
+function miFindAutoTargetId() {
+  const missing = miGetMissingList(); // respects the current search + frozen order
+  for (let i = missing.length - 1; i >= 0; i--) {
+    if (!miPending.has(missing[i].id)) return missing[i].id;
+  }
+  return null;
+}
+
+function miPageIndexForId(id) {
+  const missing = miGetMissingList();
+  const idx = missing.findIndex(p => p.id === id);
+  return idx === -1 ? null : Math.floor(idx / MI_PAGE_SIZE);
+}
+
+function miJumpToPageFor(id) {
+  const page = miPageIndexForId(id);
+  if (page !== null && page !== miPage) {
+    miPage = page;
+    renderMissingImagesList();
+  }
+}
+
+function miGlobalDragOver(e) {
+  if (!miPending || document.getElementById('missingImagesModal').classList.contains('hidden')) return;
+  e.preventDefault();
+}
+
+function miGlobalDrop(e) {
+  if (document.getElementById('missingImagesModal').classList.contains('hidden')) return;
+  e.preventDefault();
+
+  const targetId = miFindAutoTargetId();
+  if (targetId === null) return; // nothing left to target
+
+  const files = e.dataTransfer && e.dataTransfer.files;
+  const imgFile = files && [...files].find(f => f.type.startsWith('image/'));
+  if (imgFile) {
+    miJumpToPageFor(targetId);
+    miStageFile(targetId, imgFile);
+    return;
+  }
+
+  const uri = e.dataTransfer && e.dataTransfer.getData('text/uri-list');
+  if (uri) {
+    miJumpToPageFor(targetId);
+    miStageUrl(targetId, uri);
+  }
+}
+
+// Attached only while the modal is open, so it never interferes with
+// drop zones elsewhere in Admin (e.g. the Add/Edit Product photo
+// field). A row's own "Upload / Drop" control still stops this event
+// from bubbling here (see setupDropZone), so aiming precisely at a
+// specific row's control still targets that exact row — this handler
+// only takes over for drops anywhere else.
+function miAttachGlobalDropHandler() {
+  document.addEventListener('dragover', miGlobalDragOver);
+  document.addEventListener('drop', miGlobalDrop);
+}
+function miDetachGlobalDropHandler() {
+  document.removeEventListener('dragover', miGlobalDragOver);
+  document.removeEventListener('drop', miGlobalDrop);
+}
+
+/* ---- Save All: commits every staged photo in one batch ---- */
+
+async function miSaveAll() {
+  const entries = [...miPending.entries()];
+  if (entries.length === 0) return;
+
+  const btn = document.getElementById('miSaveAllBtn');
+  const label = document.getElementById('miSaveAllLabel');
+  btn.disabled = true;
+
+  const failed = [];
+  for (let i = 0; i < entries.length; i++) {
+    const [id, staged] = entries[i];
+    label.textContent = `Saving ${i + 1} of ${entries.length}...`;
+    try {
+      const imageUrl = staged.file ? await sbUploadImage(staged.file) : await sbFetchExternalImage(staged.url);
+      const local = allProducts.find(x => x.id === id);
+      if (local) {
+        await sbUpdateProduct(id, { ...local, image: imageUrl });
+        local.image = imageUrl;
+      }
+      miPending.delete(id);
+    } catch (err) {
+      failed.push({ id, message: err.message });
+    }
+  }
+
+  invalidateProductsCache();
+  renderTable();
+  renderMissingImagesList(); // saved rows drop off; anything failed stays Pending so you can retry
+
+  if (failed.length > 0) {
+    const names = failed.map(f => {
+      const p = allProducts.find(x => x.id === f.id);
+      return `• ${p ? p.name : 'Product #' + f.id}: ${f.message}`;
+    }).join('\n');
+    alert(`Saved everything except ${failed.length} photo${failed.length === 1 ? '' : 's'}, which stayed in the list so you can retry:\n\n${names}`);
+  }
+}
+window.miSaveAll = miSaveAll;
 
 /* ---------- Bulk apply one photo to a whole subcategory ---------- */
 /*
@@ -904,160 +1060,6 @@ async function applyBulkPhoto() {
   }
 }
 window.applyBulkPhoto = applyBulkPhoto;
-
-/* ---------- Bulk delete a hand-picked set of products ---------- */
-/*
-   Search/filter narrows the checklist below (e.g. typing "Volkswagen"
-   keeps anything whose name/brand starts with or contains those
-   letters, same as the main search box) — it does NOT delete by
-   itself. You still tick exactly which products should go, then hit
-   Delete Selected. Ticks persist while you keep narrowing/widening
-   the filters, so you can search "Volkswagen", tick a batch, clear
-   the search, search something else, and tick more before deleting
-   everything in one shot.
-*/
-
-function openBulkDeleteModal() {
-  bulkDeleteSelectedIds = new Set();
-  document.getElementById('bdSearch').value = '';
-  populateBulkDeleteCategorySelect();
-  updateBulkDeleteSubcategoryOptions();
-  document.getElementById('bulkDeleteModal').classList.remove('hidden');
-}
-window.openBulkDeleteModal = openBulkDeleteModal;
-
-function closeBulkDeleteModal() {
-  document.getElementById('bulkDeleteModal').classList.add('hidden');
-}
-window.closeBulkDeleteModal = closeBulkDeleteModal;
-
-function populateBulkDeleteCategorySelect() {
-  const select = document.getElementById('bdCategory');
-  if (select.dataset.populated) return;
-  CATEGORIES.forEach(cat => {
-    select.insertAdjacentHTML('beforeend', `<option value="${cat}">${cat}</option>`);
-  });
-  select.dataset.populated = '1';
-}
-
-// Built from subcategory values that actually exist on live products
-// right now, same approach as the Bulk Photo modal's subcategory list.
-function updateBulkDeleteSubcategoryOptions() {
-  const cat = document.getElementById('bdCategory').value;
-  const select = document.getElementById('bdSubcategory');
-
-  const subsSet = new Set();
-  allProducts.forEach(p => {
-    if (!p.subcategory) return;
-    if (cat !== 'all' && p.category !== cat) return;
-    subsSet.add(p.subcategory);
-  });
-  const subs = [...subsSet].sort();
-
-  select.innerHTML = '<option value="all">All Subcategories</option>' +
-    subs.map(s => `<option value="${s.replace(/"/g, '&quot;')}">${s}</option>`).join('');
-  renderBulkDeleteProductList();
-}
-
-// Products currently visible in the checklist based on the
-// Category / Subcategory / Search filters. The search box matches
-// anywhere in the name or brand (so "Volkswagen" matches "VW
-// Volkswagen Golf Wing Mirror" and "Genuine Volkswagen Oil Filter"
-// alike) — exactly like the main product table's search box.
-function bulkDeleteFilteredProducts() {
-  const cat = document.getElementById('bdCategory').value;
-  const sub = document.getElementById('bdSubcategory').value;
-  const q = document.getElementById('bdSearch').value.trim().toLowerCase();
-
-  return allProducts.filter(p => {
-    if (cat !== 'all' && p.category !== cat) return false;
-    if (sub !== 'all' && p.subcategory !== sub) return false;
-    if (q) {
-      const haystack = `${p.name} ${p.brand || ''}`.toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    return true;
-  });
-}
-
-// Renders the checklist of filtered products. Selection state
-// (bulkDeleteSelectedIds) persists across re-filtering, same as the
-// Bulk Photo modal — narrow, tick, narrow again, tick more.
-function renderBulkDeleteProductList() {
-  const listEl = document.getElementById('bdProductList');
-  const filtered = bulkDeleteFilteredProducts();
-
-  if (filtered.length === 0) {
-    listEl.innerHTML = `<p class="text-xs text-slate-500 p-4 text-center">No products match these filters.</p>`;
-  } else {
-    listEl.innerHTML = filtered.map(p => `
-      <label class="flex items-center gap-3 px-3 py-2 hover:bg-slate-800/60 cursor-pointer">
-        <input type="checkbox" data-product-id="${p.id}" ${bulkDeleteSelectedIds.has(p.id) ? 'checked' : ''} class="w-4 h-4 accent-rose-600 shrink-0">
-        <img src="${p.image || ''}" alt="" class="w-9 h-9 rounded object-cover bg-slate-800 border border-slate-700 shrink-0" onerror="this.style.opacity=0.2">
-        <span class="flex-1 min-w-0">
-          <span class="block text-xs text-white truncate">${p.brand ? p.brand + ' — ' : ''}${p.name}</span>
-          <span class="block text-[11px] text-slate-500 truncate">${p.subcategory || p.category}</span>
-        </span>
-      </label>
-    `).join('');
-  }
-
-  updateBulkDeleteMatchCount();
-}
-
-function bulkDeleteSelectAllVisible() {
-  bulkDeleteFilteredProducts().forEach(p => bulkDeleteSelectedIds.add(p.id));
-  renderBulkDeleteProductList();
-}
-window.bulkDeleteSelectAllVisible = bulkDeleteSelectAllVisible;
-
-function bulkDeleteClearSelection() {
-  bulkDeleteSelectedIds.clear();
-  renderBulkDeleteProductList();
-}
-window.bulkDeleteClearSelection = bulkDeleteClearSelection;
-
-function bulkDeleteMatches() {
-  return allProducts.filter(p => bulkDeleteSelectedIds.has(p.id));
-}
-
-function updateBulkDeleteMatchCount() {
-  const countEl = document.getElementById('bdMatchCount');
-  const count = bulkDeleteSelectedIds.size;
-  countEl.textContent = count > 0
-    ? `This will permanently delete the ${count} product${count === 1 ? '' : 's'} you've selected.`
-    : 'Tick the products above that should be deleted.';
-}
-
-async function applyBulkDelete() {
-  const matches = bulkDeleteMatches();
-  if (matches.length === 0) { alert('Tick at least one product in the list first.'); return; }
-
-  const preview = matches.slice(0, 5).map(p => `• ${p.name}`).join('\n');
-  const more = matches.length > 5 ? `\n…and ${matches.length - 5} more` : '';
-  if (!confirm(`Permanently delete ${matches.length} selected product${matches.length === 1 ? '' : 's'}?\n\n${preview}${more}\n\nThis removes them from the live site immediately and can't be undone.`)) return;
-
-  const btn = document.getElementById('bdDeleteBtn');
-  const originalLabel = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Deleting...';
-
-  try {
-    await sbDeleteProducts(matches.map(p => p.id));
-    await refreshProducts();
-    closeBulkDeleteModal();
-    alert(`Done — permanently deleted ${matches.length} selected product${matches.length === 1 ? '' : 's'}.`);
-  } catch (err) {
-    const hint = /401|403|permission|rls|policy/i.test(err.message)
-      ? '\n\nThis usually means the "Public can write products" policy (see SUPABASE_SETUP.md, step 1) hasn\'t been created on your products table yet — that policy is what allows deleting, not just adding/editing.'
-      : '';
-    alert('Could not delete the selected products.\n\n' + err.message + hint);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = originalLabel;
-  }
-}
-window.applyBulkDelete = applyBulkDelete;
 
 /* ---------- Auto-Fix Categories ---------- */
 
