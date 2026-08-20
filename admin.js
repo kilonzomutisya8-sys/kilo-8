@@ -1248,7 +1248,6 @@ async function processBulkFile(file) {
 
     const arrayBuffer = await file.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
     // Normalizes a header/cell for comparison: lowercase, trim, and
     // strip all spaces/punctuation, so "Product Name", "product_name",
@@ -1258,29 +1257,48 @@ async function processBulkFile(file) {
     const NAME_ALIASES = ['name', 'product', 'productname', 'part', 'partname', 'item', 'itemname', 'title', 'partdescription'];
     const PRICE_ALIASES = ['price', 'sellingprice', 'unitprice', 'cost', 'amount', 'rate', 'retailprice'];
 
-    // Some real-world spreadsheets have a title/logo row (or a blank
-    // row) above the actual column headers. Scan the first several
-    // rows for the first one that looks like a real header row — i.e.
-    // it has a cell matching a Name alias AND a cell matching a Price
-    // alias — and use that as the header row instead of always
-    // assuming row 1 is it.
-    const rawGrid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    if (rawGrid.length === 0) {
-      alert('That file has no rows to import.');
-      return;
-    }
-    let headerRowIndex = 0;
-    for (let i = 0; i < Math.min(10, rawGrid.length); i++) {
-      const normCells = (rawGrid[i] || []).map(normalizeHeader);
-      const hasName = normCells.some(c => NAME_ALIASES.includes(c));
-      const hasPrice = normCells.some(c => PRICE_ALIASES.includes(c));
-      if (hasName && hasPrice) { headerRowIndex = i; break; }
-    }
+    // Workbooks sometimes have every product on one sheet, but they can
+    // also be organized with one sheet per category (e.g. "Air Filters",
+    // "Brake Pads", "Fan Belt"...) — that's a normal way to lay out a
+    // parts catalog. Reading only the first sheet would silently drop
+    // every other tab, so every sheet in the workbook is scanned and
+    // their rows combined into one list before anything is imported.
+    const rows = [];
+    workbook.SheetNames.forEach(sheetName => {
+      const sheet = workbook.Sheets[sheetName];
 
-    const rows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex, defval: '' });
+      // Some real-world spreadsheets have a title/logo row (or a blank
+      // row) above the actual column headers. Scan the first several
+      // rows for the first one that looks like a real header row — i.e.
+      // it has a cell matching a Name alias AND a cell matching a Price
+      // alias — and use that as the header row instead of always
+      // assuming row 1 is it.
+      const rawGrid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (rawGrid.length === 0) return; // empty sheet/tab — nothing to read
+
+      let headerRowIndex = -1;
+      for (let i = 0; i < Math.min(10, rawGrid.length); i++) {
+        const normCells = (rawGrid[i] || []).map(normalizeHeader);
+        const hasName = normCells.some(c => NAME_ALIASES.includes(c));
+        const hasPrice = normCells.some(c => PRICE_ALIASES.includes(c));
+        if (hasName && hasPrice) { headerRowIndex = i; break; }
+      }
+      if (headerRowIndex === -1) return; // this sheet has no Name+Price header row — skip it, not an error
+
+      const sheetRows = XLSX.utils.sheet_to_json(sheet, { range: headerRowIndex, defval: '' });
+      sheetRows.forEach((row, i) => {
+        // Tag each row with where it came from so skip/error messages
+        // below can point back to the right sheet and row number,
+        // even though rows from every sheet are now processed together.
+        row.__rowLabel = workbook.SheetNames.length > 1
+          ? `Sheet "${sheetName}", row ${i + headerRowIndex + 2}`
+          : `Row ${i + headerRowIndex + 2}`;
+        rows.push(row);
+      });
+    });
 
     if (rows.length === 0) {
-      alert('That file has a header row but no data rows underneath it to import.');
+      alert('No sheet in that file has both a product-name column and a price column with data underneath it, so nothing could be imported.');
       return;
     }
 
@@ -1327,25 +1345,26 @@ async function processBulkFile(file) {
     const skipped = [];
     const recategorized = [];
 
-    rows.forEach((row, i) => {
+    rows.forEach((row) => {
+      const rowLabel = row.__rowLabel || 'Row';
       const name = getField(row, 'Name', 'Product', 'Product Name', 'Part', 'Part Name', 'Item', 'Item Name', 'Title');
       const priceRaw = getField(row, 'Price', 'Selling Price', 'Unit Price', 'Cost', 'Amount', 'Rate', 'Retail Price');
       const price = parsePrice(priceRaw);
 
       if (!name && (priceRaw === '' || priceRaw === undefined)) {
-        skipped.push(`Row ${i + headerRowIndex + 2}: this row looks empty (no name or price found)`);
+        skipped.push(`${rowLabel}: this row looks empty (no name or price found)`);
         return;
       }
       if (!name) {
-        skipped.push(`Row ${i + headerRowIndex + 2}: missing a product name`);
+        skipped.push(`${rowLabel}: missing a product name`);
         return;
       }
       if (priceRaw === '' || priceRaw === undefined) {
-        skipped.push(`Row ${i + headerRowIndex + 2} ("${name}"): missing a price`);
+        skipped.push(`${rowLabel} ("${name}"): missing a price`);
         return;
       }
       if (isNaN(price)) {
-        skipped.push(`Row ${i + headerRowIndex + 2} ("${name}"): price "${priceRaw}" isn't a valid number`);
+        skipped.push(`${rowLabel} ("${name}"): price "${priceRaw}" isn't a valid number`);
         return;
       }
 
@@ -1407,7 +1426,7 @@ async function processBulkFile(file) {
     });
 
     if (toImport.length === 0) {
-      const headers = Object.keys(rows[0] || {});
+      const headers = Object.keys(rows[0] || {}).filter(k => k !== '__rowLabel');
       alert(
         'No rows could be imported.\n\n' +
         (skipped[0] || '') +
@@ -1424,29 +1443,44 @@ async function processBulkFile(file) {
     // predictable, easy-to-scan order.
     toImport.sort((a, b) => a.name.trim().toLowerCase().localeCompare(b.name.trim().toLowerCase()));
 
-    // Match against products already on the site by name (case/space
-    // insensitive). Anything that already exists — on the site, or
+    // Match against products already on the site — by normalized name
+    // (ignoring case, spacing and punctuation, so "NT30(KD1735)" and
+    // "NT30 (KD1735)" count as the same product) AND by part number
+    // (also punctuation/case-insensitive), whichever matches first.
+    // This catches near-duplicates, not just character-for-character
+    // identical names. Anything that matches — on the site, or
     // repeated earlier in this same file — is treated as a duplicate
     // and is NOT written to the site at all (no insert, no update).
     const existingByName = new Map();
-    allProducts.forEach(p => existingByName.set(p.name.trim().toLowerCase(), p));
+    const existingByPartNo = new Map();
+    allProducts.forEach(p => {
+      const nameKey = idNormalizeText(p.name);
+      if (nameKey) existingByName.set(nameKey, p);
+      const pnKey = idNormalizePartNo(p.partNumber);
+      if (pnKey) existingByPartNo.set(pnKey, p);
+    });
 
-    const seenInFile = new Set();
+    const seenNameInFile = new Set();
+    const seenPartNoInFile = new Set();
     const toInsert = [];
     const duplicates = [];
     const autoHidden = [];
     toImport.forEach(product => {
-      const key = product.name.trim().toLowerCase();
+      const nameKey = idNormalizeText(product.name);
+      const pnKey = idNormalizePartNo(product.partNumber);
 
-      if (existingByName.has(key)) {
-        duplicates.push(`"${product.name}": already exists on the site — skipped, not added.`);
+      const existingMatch = (pnKey && existingByPartNo.get(pnKey)) || existingByName.get(nameKey);
+      if (existingMatch) {
+        const via = pnKey && existingByPartNo.get(pnKey) ? `part number "${product.partNumber}"` : 'name';
+        duplicates.push(`"${product.name}": matches "${existingMatch.name}" already on the site (by ${via}) — skipped, not added.`);
         return;
       }
-      if (seenInFile.has(key)) {
-        duplicates.push(`"${product.name}": appears more than once in this file — only the first one was kept.`);
+      if ((pnKey && seenPartNoInFile.has(pnKey)) || seenNameInFile.has(nameKey)) {
+        duplicates.push(`"${product.name}": appears more than once in this file (same name or part number) — only the first one was kept.`);
         return;
       }
-      seenInFile.add(key);
+      seenNameInFile.add(nameKey);
+      if (pnKey) seenPartNoInFile.add(pnKey);
 
       const hideReason = getAutoHideReason(product);
       if (hideReason) {
