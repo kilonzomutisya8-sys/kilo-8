@@ -6,7 +6,7 @@
     <title>Kilo Auto Spares Ltd — Witu Rd, Brunei House</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body class="bg-slate-100 text-slate-900 font-sans">
 
@@ -61,7 +61,8 @@
                 <div class="rail-card-static bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col hover:border-red-300 hover:shadow-md transition shadow-sm">
                     <div class="aspect-[3/2] overflow-hidden bg-slate-100 relative group">
                         <img src="${product.image}" alt="${product.name}" class="w-full h-full object-contain opacity-90 group-hover:opacity-100 transition duration-300">
-                        ${product.subcategory ? `<span class="absolute top-3 left-3 bg-slate-900/90 text-white text-xs font-semibold px-2 py-1 rounded shadow">${product.subcategory}</span>` : ''}
+                        <div class="product-watermark"><img src="images/logo.jpeg" alt="Kilo Auto Spares"></div>
+                        ${product.subcategory ? `<span class="absolute top-3 left-11 bg-slate-900/90 text-white text-xs font-semibold px-2 py-1 rounded shadow">${product.subcategory}</span>` : ''}
                         ${pct > 0 ? `<span class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-${pct}%</span>` : ''}
                         <button onclick="openQuickView(${product.id})" class="absolute inset-x-3 bottom-3 bg-slate-900/90 hover:bg-slate-900 text-white text-xs font-semibold py-2 rounded-lg opacity-0 group-hover:opacity-100 transition flex items-center justify-center space-x-1.5 border border-slate-800">
                             <i class="fa-solid fa-eye"></i><span>Quick View</span>
