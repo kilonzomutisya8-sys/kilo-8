@@ -112,6 +112,23 @@ Until this table exists, the site simply defaults to showing prices
 as normal — nothing breaks, the Admin toggle just won't have anywhere
 to save its setting.
 
+### Logo position & size (for the "Reposition & Resize Logo" tool)
+
+This adds three columns to the same `site_settings` row, which store
+where the small logo badge sits on every product photo (as a percent
+of the photo box) and how big it is (in pixels). Run this once in the
+SQL Editor:
+
+```sql
+alter table site_settings add column if not exists logo_top numeric default 4;
+alter table site_settings add column if not exists logo_left numeric default 4;
+alter table site_settings add column if not exists logo_size numeric default 34;
+```
+
+Until these columns exist, the logo simply shows in its default small
+top-left position — nothing breaks, the Admin tool just won't have
+anywhere to save a custom position until you run this.
+
 ## 3. Create the `category_images` table (for the homepage category tiles)
 
 Powers the **Category Images** button in Admin, which lets you attach a

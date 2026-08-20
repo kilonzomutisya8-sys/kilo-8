@@ -195,7 +195,8 @@ async function openQuickView(productId) {
   document.getElementById('quickViewBody').innerHTML = `
       <div class="h-64 sm:h-full bg-slate-900 relative">
           <img src="${product.image}" alt="${product.name}" class="w-full h-full object-contain">
-          ${pct > 0 ? `<span class="absolute top-3 left-3 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-${pct}%</span>` : ''}
+          <div class="product-watermark"><img src="images/logo.jpeg" alt="Kilo Auto Spares"></div>
+          ${pct > 0 ? `<span class="absolute top-3 left-11 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-${pct}%</span>` : ''}
       </div>
       <div class="p-6 flex flex-col">
           <span class="text-xs text-red-400 font-bold uppercase tracking-wider">${product.category}${product.subcategory ? ' &middot; ' + product.subcategory : ''}</span>
@@ -240,6 +241,22 @@ function renderFloatingWhatsApp() {
   </a>`;
 }
 
+// Applies the saved logo watermark position/size (set from Admin →
+// "Reposition & Resize Logo") to every product photo on the page, by
+// writing them as CSS variables on <html>. Falls back to the default
+// small corner badge if nothing's been saved yet.
+async function applyLogoWatermarkSettings() {
+  try {
+    const { top, left, size } = await sbGetLogoWatermarkSettings();
+    const root = document.documentElement.style;
+    root.setProperty('--product-logo-top', top + '%');
+    root.setProperty('--product-logo-left', left + '%');
+    root.setProperty('--product-logo-size', size + 'px');
+  } catch (e) {
+    // Defaults in style.css already cover this — nothing to do.
+  }
+}
+
 function initLayout(activePage) {
   document.getElementById('topBars').innerHTML = renderTopBars();
   document.getElementById('siteHeader').innerHTML = renderHeader(activePage);
@@ -275,6 +292,7 @@ function initLayout(activePage) {
   }
 
   initCart();
+  applyLogoWatermarkSettings();
 }
 
 // Keeps the header (logo/nav + search bar) permanently pinned to the

@@ -2051,3 +2051,148 @@ window.idApplySelected = idApplySelected;
   if (idSearchEl) idSearchEl.addEventListener('input', () => { idPage = 0; idRenderReview(); });
   if (idFilterEl) idFilterEl.addEventListener('change', () => { idPage = 0; idRenderReview(); });
 })();
+
+/* ---------- Reposition & Resize Logo (product photo watermark) ---------- */
+// Drag the badge on the sample photo to set its top/left as a percent
+// of the photo box (so it lands in the same relative spot on every
+// card, whatever size the card renders at), and use the size box to
+// set its pixel size. Saved to the same site_settings row as the
+// Prices toggle, and read by every page via applyLogoWatermarkSettings()
+// in layout.js — so once saved, it applies to every visitor immediately.
+
+let lwState = { top: 4, left: 4, size: 34 }; // top/left in %, size in px
+let lwDragging = false;
+
+async function openLogoWatermarkModal() {
+  document.getElementById('logoWatermarkModal').classList.remove('hidden');
+  document.getElementById('logoWatermarkModal').classList.add('flex');
+  document.getElementById('lwStatus').textContent = 'Loading current position…';
+  try {
+    lwState = await sbGetLogoWatermarkSettings();
+  } catch (e) {
+    lwState = { top: 4, left: 4, size: 34 };
+  }
+  document.getElementById('lwStatus').textContent = '';
+  lwRenderHandle();
+  document.getElementById('lwSizeInput').value = Math.round(lwState.size);
+}
+window.openLogoWatermarkModal = openLogoWatermarkModal;
+
+function closeLogoWatermarkModal() {
+  document.getElementById('logoWatermarkModal').classList.add('hidden');
+  document.getElementById('logoWatermarkModal').classList.remove('flex');
+}
+window.closeLogoWatermarkModal = closeLogoWatermarkModal;
+
+function lwRenderHandle() {
+  const handle = document.getElementById('lwLogoHandle');
+  handle.style.top = lwState.top + '%';
+  handle.style.left = lwState.left + '%';
+  handle.style.width = lwState.size + 'px';
+  handle.style.height = lwState.size + 'px';
+}
+
+// Clamp so the badge always stays fully inside the preview box,
+// converting its pixel size into a percent of the box for the check.
+function lwClampPosition(box) {
+  const wPct = (lwState.size / box.width) * 100;
+  const hPct = (lwState.size / box.height) * 100;
+  lwState.left = Math.min(Math.max(lwState.left, 0), 100 - wPct);
+  lwState.top = Math.min(Math.max(lwState.top, 0), 100 - hPct);
+  if (lwState.left < 0) lwState.left = 0;
+  if (lwState.top < 0) lwState.top = 0;
+}
+
+function lwPointFromEvent(e) {
+  if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+
+function lwStartDrag(e) {
+  lwDragging = true;
+  e.preventDefault();
+}
+
+function lwOnMove(e) {
+  if (!lwDragging) return;
+  const previewBox = document.getElementById('lwPreviewBox');
+  const box = previewBox.getBoundingClientRect();
+  const pt = lwPointFromEvent(e);
+  const left = ((pt.x - box.left) / box.width) * 100;
+  const top = ((pt.y - box.top) / box.height) * 100;
+  // Position is set relative to where you grabbed/dropped, centering
+  // the badge under the pointer.
+  const wPct = (lwState.size / box.width) * 100;
+  const hPct = (lwState.size / box.height) * 100;
+  lwState.left = left - wPct / 2;
+  lwState.top = top - hPct / 2;
+  lwClampPosition(box);
+  lwRenderHandle();
+}
+
+function lwEndDrag() {
+  lwDragging = false;
+}
+
+function lwStepSize(delta) {
+  const input = document.getElementById('lwSizeInput');
+  let next = (parseInt(input.value, 10) || lwState.size) + delta;
+  next = Math.min(Math.max(next, 16), 120);
+  input.value = next;
+  lwApplySizeFromInput();
+}
+window.lwStepSize = lwStepSize;
+
+function lwApplySizeFromInput() {
+  const input = document.getElementById('lwSizeInput');
+  let size = parseInt(input.value, 10);
+  if (isNaN(size)) return;
+  size = Math.min(Math.max(size, 16), 120);
+  lwState.size = size;
+  const previewBox = document.getElementById('lwPreviewBox');
+  const box = previewBox.getBoundingClientRect();
+  lwClampPosition(box);
+  lwRenderHandle();
+}
+
+function lwResetDefault() {
+  lwState = { top: 4, left: 4, size: 34 };
+  document.getElementById('lwSizeInput').value = 34;
+  lwRenderHandle();
+  document.getElementById('lwStatus').textContent = '';
+}
+window.lwResetDefault = lwResetDefault;
+
+async function saveLogoWatermarkSettings() {
+  const btn = document.getElementById('lwSaveBtn');
+  const status = document.getElementById('lwStatus');
+  btn.disabled = true;
+  status.className = 'text-xs min-h-[1rem] text-slate-400';
+  status.textContent = 'Saving…';
+  try {
+    await sbSetLogoWatermarkSettings(lwState);
+    status.className = 'text-xs min-h-[1rem] text-emerald-400';
+    status.textContent = 'Saved — the logo is updated on the live site for every visitor.';
+    if (typeof applyLogoWatermarkSettings === 'function') applyLogoWatermarkSettings();
+  } catch (e) {
+    status.className = 'text-xs min-h-[1rem] text-red-400';
+    status.textContent = 'Could not save. If this is the first time, make sure the logo_top/logo_left/logo_size columns have been added to site_settings — see SUPABASE_SETUP.md.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+window.saveLogoWatermarkSettings = saveLogoWatermarkSettings;
+
+(function lwWireUpDragEvents() {
+  const handle = document.getElementById('lwLogoHandle');
+  if (!handle) return;
+  handle.addEventListener('mousedown', lwStartDrag);
+  handle.addEventListener('touchstart', lwStartDrag, { passive: false });
+  document.addEventListener('mousemove', lwOnMove);
+  document.addEventListener('touchmove', lwOnMove, { passive: false });
+  document.addEventListener('mouseup', lwEndDrag);
+  document.addEventListener('touchend', lwEndDrag);
+
+  const sizeInput = document.getElementById('lwSizeInput');
+  if (sizeInput) sizeInput.addEventListener('input', lwApplySizeFromInput);
+})();

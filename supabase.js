@@ -191,6 +191,41 @@ async function sbSetShowPrices(value) {
   });
 }
 
+/* ---------- Product photo logo watermark (position + size) ---------- */
+// Same site_settings row (id = 1) also holds where the small logo
+// badge sits on every product photo, and how big it is. top/left are
+// stored as a PERCENT of the photo box (0–100) so the badge lands in
+// the same relative spot on every card regardless of its pixel size;
+// size is stored in px since the badge itself is a fixed physical
+// size. If the columns don't exist yet (see SUPABASE_SETUP.md), this
+// safely falls back to the small default corner badge — nothing
+// breaks on sites that haven't run the migration yet.
+const LOGO_WATERMARK_DEFAULTS = { top: 4, left: 4, size: 34 };
+
+async function sbGetLogoWatermarkSettings() {
+  try {
+    const rows = await sbRequest('/site_settings?select=logo_top,logo_left,logo_size&id=eq.1');
+    const row = rows && rows[0];
+    if (!row) return { ...LOGO_WATERMARK_DEFAULTS };
+    return {
+      top: row.logo_top !== null && row.logo_top !== undefined ? row.logo_top : LOGO_WATERMARK_DEFAULTS.top,
+      left: row.logo_left !== null && row.logo_left !== undefined ? row.logo_left : LOGO_WATERMARK_DEFAULTS.left,
+      size: row.logo_size !== null && row.logo_size !== undefined ? row.logo_size : LOGO_WATERMARK_DEFAULTS.size
+    };
+  } catch (e) {
+    console.warn('Could not load logo watermark settings — using the default corner position/size.', e);
+    return { ...LOGO_WATERMARK_DEFAULTS };
+  }
+}
+
+async function sbSetLogoWatermarkSettings({ top, left, size }) {
+  await sbRequest('/site_settings?id=eq.1', {
+    method: 'PATCH',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ logo_top: top, logo_left: left, logo_size: size })
+  });
+}
+
 /* ---------- Category images (Homepage "Shop by Category" tiles) ---------- */
 // Backed by a small `category_images` table: one row per category
 // name, holding the image URL admin picked for that tile. Categories
