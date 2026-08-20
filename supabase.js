@@ -200,7 +200,7 @@ async function sbSetShowPrices(value) {
 // size. If the columns don't exist yet (see SUPABASE_SETUP.md), this
 // safely falls back to the small default corner badge — nothing
 // breaks on sites that haven't run the migration yet.
-const LOGO_WATERMARK_DEFAULTS = { top: 4, left: 4, size: 34 };
+const LOGO_WATERMARK_DEFAULTS = { top: 4, left: 4, size: 56 };
 
 async function sbGetLogoWatermarkSettings() {
   try {

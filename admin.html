@@ -240,17 +240,17 @@
                             <i class="fa-solid fa-car-wrench text-6xl"></i>
                         </div>
                         <p class="absolute bottom-2 inset-x-0 text-center text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Sample product photo</p>
-                        <div id="lwLogoHandle" class="absolute rounded-full overflow-hidden border-2 border-white shadow-lg cursor-move" style="width:34px; height:34px; top:4%; left:4%;">
-                            <img src="images/logo.jpeg" alt="Logo" class="w-full h-full object-cover pointer-events-none" draggable="false">
+                        <div id="lwLogoHandle" class="absolute rounded-md overflow-hidden border-2 border-white shadow-lg cursor-move bg-white" style="width:56px; height:28px; top:4%; left:4%;">
+                            <img src="images/logo.jpeg" alt="Logo" class="w-full h-full object-contain pointer-events-none" draggable="false">
                         </div>
                     </div>
 
                     <div class="flex items-end gap-4">
                         <div class="flex-1">
-                            <label class="block text-xs font-semibold text-slate-400 mb-1">Size (pixels)</label>
+                            <label class="block text-xs font-semibold text-slate-400 mb-1">Width (pixels) — height follows automatically to match your logo's shape</label>
                             <div class="flex items-center gap-2">
                                 <button type="button" onclick="lwStepSize(-4)" class="w-9 h-9 shrink-0 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold">−</button>
-                                <input type="number" id="lwSizeInput" min="16" max="120" step="1" value="34" class="w-full text-center px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
+                                <input type="number" id="lwSizeInput" min="24" max="200" step="1" value="56" class="w-full text-center px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition">
                                 <button type="button" onclick="lwStepSize(4)" class="w-9 h-9 shrink-0 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold">+</button>
                             </div>
                         </div>

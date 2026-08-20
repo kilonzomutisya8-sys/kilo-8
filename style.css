@@ -120,20 +120,23 @@ html, body {
    for every visitor). --product-logo-top / --product-logo-left are
    percentages of the photo box, so the badge lands in the same
    relative spot no matter how big the card is; --product-logo-size
-   is a fixed pixel size. These defaults are only used before the
-   settings load or if none have been saved yet. */
+   sets the badge's width in pixels — height follows automatically at
+   a 2:1 ratio to match the logo's own rectangular shape, so it's
+   never stretched or cropped. These defaults are only used before
+   the settings load or if none have been saved yet. */
 :root {
   --product-logo-top: 4%;
   --product-logo-left: 4%;
-  --product-logo-size: 34px;
+  --product-logo-size: 56px;
 }
 .product-watermark {
   position: absolute;
   top: var(--product-logo-top);
   left: var(--product-logo-left);
   width: var(--product-logo-size);
-  height: var(--product-logo-size);
-  border-radius: 9999px;
+  aspect-ratio: 2 / 1;
+  height: auto;
+  border-radius: 6px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.92);
   border: 1.5px solid rgba(255, 255, 255, 0.85);
@@ -144,7 +147,7 @@ html, body {
 .product-watermark img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 

@@ -2060,7 +2060,7 @@ window.idApplySelected = idApplySelected;
 // Prices toggle, and read by every page via applyLogoWatermarkSettings()
 // in layout.js — so once saved, it applies to every visitor immediately.
 
-let lwState = { top: 4, left: 4, size: 34 }; // top/left in %, size in px
+let lwState = { top: 4, left: 4, size: 56 }; // top/left in %, size = badge WIDTH in px (height follows at 2:1 to match the logo's shape)
 let lwDragging = false;
 
 async function openLogoWatermarkModal() {
@@ -2070,7 +2070,7 @@ async function openLogoWatermarkModal() {
   try {
     lwState = await sbGetLogoWatermarkSettings();
   } catch (e) {
-    lwState = { top: 4, left: 4, size: 34 };
+    lwState = { top: 4, left: 4, size: 56 };
   }
   document.getElementById('lwStatus').textContent = '';
   lwRenderHandle();
@@ -2089,14 +2089,14 @@ function lwRenderHandle() {
   handle.style.top = lwState.top + '%';
   handle.style.left = lwState.left + '%';
   handle.style.width = lwState.size + 'px';
-  handle.style.height = lwState.size + 'px';
+  handle.style.height = (lwState.size / 2) + 'px'; // 2:1, matches the logo's actual rectangular shape
 }
 
 // Clamp so the badge always stays fully inside the preview box,
 // converting its pixel size into a percent of the box for the check.
 function lwClampPosition(box) {
   const wPct = (lwState.size / box.width) * 100;
-  const hPct = (lwState.size / box.height) * 100;
+  const hPct = ((lwState.size / 2) / box.height) * 100;
   lwState.left = Math.min(Math.max(lwState.left, 0), 100 - wPct);
   lwState.top = Math.min(Math.max(lwState.top, 0), 100 - hPct);
   if (lwState.left < 0) lwState.left = 0;
@@ -2123,7 +2123,7 @@ function lwOnMove(e) {
   // Position is set relative to where you grabbed/dropped, centering
   // the badge under the pointer.
   const wPct = (lwState.size / box.width) * 100;
-  const hPct = (lwState.size / box.height) * 100;
+  const hPct = ((lwState.size / 2) / box.height) * 100;
   lwState.left = left - wPct / 2;
   lwState.top = top - hPct / 2;
   lwClampPosition(box);
@@ -2137,7 +2137,7 @@ function lwEndDrag() {
 function lwStepSize(delta) {
   const input = document.getElementById('lwSizeInput');
   let next = (parseInt(input.value, 10) || lwState.size) + delta;
-  next = Math.min(Math.max(next, 16), 120);
+  next = Math.min(Math.max(next, 24), 200);
   input.value = next;
   lwApplySizeFromInput();
 }
@@ -2147,7 +2147,7 @@ function lwApplySizeFromInput() {
   const input = document.getElementById('lwSizeInput');
   let size = parseInt(input.value, 10);
   if (isNaN(size)) return;
-  size = Math.min(Math.max(size, 16), 120);
+  size = Math.min(Math.max(size, 24), 200);
   lwState.size = size;
   const previewBox = document.getElementById('lwPreviewBox');
   const box = previewBox.getBoundingClientRect();
@@ -2156,8 +2156,8 @@ function lwApplySizeFromInput() {
 }
 
 function lwResetDefault() {
-  lwState = { top: 4, left: 4, size: 34 };
-  document.getElementById('lwSizeInput').value = 34;
+  lwState = { top: 4, left: 4, size: 56 };
+  document.getElementById('lwSizeInput').value = 56;
   lwRenderHandle();
   document.getElementById('lwStatus').textContent = '';
 }
