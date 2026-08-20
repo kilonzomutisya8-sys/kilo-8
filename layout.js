@@ -193,10 +193,12 @@ async function openQuickView(productId) {
   if (!product) return;
   const pct = discountPercent(product);
   document.getElementById('quickViewBody').innerHTML = `
-      <div class="h-64 sm:h-full bg-slate-900 relative">
-          <img src="${product.image}" alt="${product.name}" class="w-full h-full object-contain">
-          <div class="product-watermark"><img src="images/logo.jpeg" alt="Kilo Auto Spares"></div>
-          ${pct > 0 ? `<span class="absolute top-3 left-11 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-${pct}%</span>` : ''}
+      <div class="aspect-[4/3] sm:aspect-auto sm:h-full bg-slate-900 relative flex items-center justify-center p-4">
+          <div class="relative inline-block max-w-full max-h-full">
+              <img src="${product.image}" alt="${product.name}" class="block max-w-full max-h-full object-contain">
+              <div class="product-watermark"><img src="images/logo.jpeg" alt="Kilo Auto Spares"></div>
+              ${pct > 0 ? `<span class="absolute top-3 left-11 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">-${pct}%</span>` : ''}
+          </div>
       </div>
       <div class="p-6 flex flex-col">
           <span class="text-xs text-red-400 font-bold uppercase tracking-wider">${product.category}${product.subcategory ? ' &middot; ' + product.subcategory : ''}</span>
